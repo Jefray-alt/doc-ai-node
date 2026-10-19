@@ -1,0 +1,18 @@
+.header {
+  flex-shrink: 0;
+  background: var(--mantine-color-white);
+  border-bottom: 1px solid var(--mantine-color-gray-3);
+}
+
+.headerInner {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+  padding: 20px 24px;
+}
+
+@media (max-width: 36em) {
+  .headerInner {
+    padding: 16px;
+  }
+}

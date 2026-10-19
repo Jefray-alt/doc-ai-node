@@ -1,0 +1,12 @@
+.composer {
+  flex-shrink: 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--mantine-color-gray-3);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (max-width: 36em) {
+  .composer {
+    padding-top: 16px;
+  }
+}

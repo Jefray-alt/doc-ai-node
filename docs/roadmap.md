@@ -8,7 +8,9 @@ This is a lightweight, outcome-oriented roadmap for a solo learning project. It 
 
 **Feature:** Single-PDF grounded chat with cited pages and source excerpts.
 
-**Status:** Product brief and MVP scope approved. Frontend foundation initialized in `frontend/` with React, TypeScript, Vite, and Mantine. Node configuration, package manifests, dependencies, and the lockfile live inside `frontend/`. The chat workspace and backend remain to be implemented; this setup does not complete the MVP feature.
+**Status:** MVP in progress. Frontend foundation and backlog feature 1, **Create the chat workspace**, are complete in `frontend/` using React, TypeScript, Vite, and Mantine. The workspace includes a conversation area, message composer, and an Add PDF entry point. Messages exist only in memory and are cleared on refresh. PDF upload, document processing, generated answers, and evidence remain unimplemented.
+
+**Validation:** Type checking, linting, and the production build pass. Browser checks cover message submission, multiline and IME input, blank-message rejection, scrolling, PDF availability dialog and focus, refresh reset, and mobile layouts at 320px and 390px.
 
 ## Next
 

@@ -1,14 +1,7 @@
-import { Container, Stack, Text, Title } from '@mantine/core'
+import { ChatWorkspace } from './components/ChatWorkspace/ChatWorkspace'
 
 function App() {
-  return (
-    <Container component="main" size="sm" py="xl">
-      <Stack gap="sm">
-        <Title order={1}>Document Chat</Title>
-        <Text c="dimmed">Your PDF conversation will appear here.</Text>
-      </Stack>
-    </Container>
-  )
+  return <ChatWorkspace />
 }
 
 export default App

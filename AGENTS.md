@@ -19,3 +19,10 @@
 - Do not duplicate detailed implementation requirements in planning docs.
 - Do not automatically implement the next feature.
 - Keep documentation lightweight for solo projects.
+
+## UI Development
+- When you need information about Mantine UI components, start with https://mantine.dev/llms.txt and follow the relevant documentation links.
+- Group each component with its styles, types, and related hooks in its own folder under `frontend/src/components/`.
+- Declare component types and interfaces in colocated `<ComponentName>.types.ts` files, not in component `.tsx` files. Keep shared domain types in the folder that owns them and import them where needed.
+- Keep `App.tsx` focused on composition. Extract state and interaction logic into focused hooks in the relevant component folder.
+- Keep Mantine theme configuration in `frontend/src/config/theme.ts`.

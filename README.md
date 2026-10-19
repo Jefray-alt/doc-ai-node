@@ -39,5 +39,9 @@ Run all npm commands from `frontend/`. `build` produces `frontend/dist/`.
 `preview` serves that production build locally.
 To pass arguments to Vite, use `npm run dev -- --host 0.0.0.0`.
 
-The initial screen only verifies the frontend foundation. PDF upload, chat, and
-backend integration will be implemented in subsequent work.
+The chat workspace supports sending messages with the Send button or Enter.
+Use Shift + Enter for a new line. Messages stay in memory for the current tab and
+are cleared when you refresh or close it; there are no accounts or saved chats.
+
+The Add PDF entry point currently opens an availability notice. PDF upload,
+document processing, and generated answers belong to later backlog features.
