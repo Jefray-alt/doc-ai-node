@@ -27,7 +27,10 @@ without implementing a frontend client.
    limit and actual PDF validation, copy valid bytes to the accepted bucket,
    record success, then delete the staging version. Cover retry/restart safety,
    reservation recovery, and cleanup. See the design's [concrete bucket
-   operations](pdf-upload-design.md#concrete-bucket-operations).
+   operations](pdf-upload-design.md#concrete-bucket-operations) and
+   [retry timing/stop conditions](pdf-upload-design.md#retry-timing-and-stop-conditions).
+   Use fake-clock tests to prove attempt limits, persisted deadlines, and that
+   finalization/cleanup retries do not repeat a confirmed successful copy.
 5. **Integration verification and documentation:** Exercise signed uploads,
    real notifications, worker processing, database/storage restarts, replayed
    uploads, private access, and initializer reruns. Document backend commands,

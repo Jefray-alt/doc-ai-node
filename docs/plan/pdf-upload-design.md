@@ -86,11 +86,14 @@ flowchart TD
     Reject["Record failed in PostgreSQL and delete rejected staging version"]
     Copy["Worker requests server-side copy of validated version"]
     Copied{"Copy successful?"}
-    Retry["Keep staging version and retry with backoff"]
+    Retry["Keep staging version; retry copy after 10, 30, then 90 seconds"]
     Exhausted["Retries exhausted: record failed and schedule staging cleanup"]
     Documents[("documents bucket: accepted PDF")]
     Record["Record uploaded in PostgreSQL"]
-    Delete["Delete staging version; retry cleanup if needed"]
+    Recorded{"Database commit confirmed?"}
+    FinalizeRetry["Retry finalization only: 10, 30, then 90 seconds; stop at 5 minutes"]
+    Reconcile["Retain both copies; flag failed job for reconciliation when PostgreSQL is available"]
+    Delete["Delete staging version; retry after 1, 5, then 15 minutes"]
     Later["Later feature: ingestion reads accepted PDF"]
 
     Reserve --> Upload --> Staging --> Event --> Queue --> Validate --> Valid
@@ -101,8 +104,12 @@ flowchart TD
     Retry -- "Attempts remain" --> Copy
     Retry -- "Exhausted" --> Exhausted
     Copied -- Yes --> Documents --> Record
-    Record --> Delete
-    Record -. "Future work" .-> Later
+    Record --> Recorded
+    Recorded -- Yes --> Delete
+    Recorded -- No --> FinalizeRetry
+    FinalizeRetry -- "Attempts remain" --> Record
+    FinalizeRetry -- "Exhausted" --> Reconcile
+    Recorded -. "After confirmed success: future work" .-> Later
     Documents -. "Read bytes" .-> Later
 ```
 
@@ -132,13 +139,42 @@ database update committed.
 
 Use separate scoped runtime credentials: the API upload signer can authorize
 writes only to `staging`; the validation worker can inspect/delete staging
-versions and write accepted objects to `documents`. Reserve administrative
-credentials for infrastructure initialization. Later ingestion will receive
-read access to `documents` only; implementing ingestion remains deferred.
+versions and write/inspect accepted objects in `documents`. Inspecting accepted
+metadata is required for recovery after an ambiguous copy result. Reserve
+administrative credentials for infrastructure initialization. Later ingestion
+will receive read access to `documents` only; implementing ingestion remains
+deferred.
 
 After successful cleanup, the PDF exists only in `documents`. Future feature-3
 work will read it there to extract text, split it into passages, and generate
 embeddings. Those outputs are not part of the bucket operations in this slice.
+
+## Retry timing and stop conditions
+
+A confirmed successful copy is not retried. The remaining operations are
+recording success in PostgreSQL and deleting the staging version; they have
+separate retry budgets so a cleanup problem cannot restart validation/copying
+or change an `uploaded` document to `failed`.
+
+| Operation | Retry policy after a transient failure | On exhaustion |
+|---|---|---|
+| Read/validate storage operations or copy into `documents` | Initial attempt plus **three retries**, waiting **10, 30, then 90 seconds** after successive failures. Maximum **5 minutes elapsed per stage**, with each storage call capped at **30 seconds**. | Stop automatic job retries, record `failed` when PostgreSQL is available, and schedule cleanup. Invalid PDF content is terminal immediately and is not retried. |
+| Record success after the copy is confirmed | Initial attempt plus **three retries**, with **10, 30, then 90 second** waits and a **5-minute elapsed deadline**. Cap each database attempt at **30 seconds**, including connection acquisition. | Keep both copies and flag the failed job for reconciliation; do not delete the source or claim `uploaded` without a confirmed database commit. If PostgreSQL is down, recording this outcome must wait for database recovery. |
+| Delete staging after `uploaded` is committed, or delete a rejected file | Initial attempt plus **three retries**, with **1, 5, then 15 minute** waits and a **30-minute elapsed deadline**. Each storage call has a **30-second** limit. | Keep the document's existing terminal status, record outstanding cleanup, and log the failure. The maintenance sweep can reattempt deletion after 24 hours; it must not restart validation or copying. |
+
+These delays are between attempts, not times when a worker sleeps while holding
+a job slot. Schedule retries durably in PostgreSQL. Count attempts and deadlines
+across restarts; cap each call to the remaining stage budget and do not start a
+new attempt after its deadline. Queue delays or unavailable infrastructure can
+postpone reconciliation, so the limits bound automatic attempts rather than
+promise that the whole system recovers within five minutes.
+
+Write the source document ID/version into worker-controlled destination
+metadata during copying. After a crash or ambiguous copy timeout, inspect that
+destination before copying again. If it matches the validated source version,
+resume the database update instead. If the database commit was ambiguous, read
+the document record before retrying it. Recovery must preserve these checkpoints
+and never reset the attempt budget on duplicate notifications.
 
 ## Durable status and validation
 
@@ -157,10 +193,10 @@ will be designed with feature 3; do not add unused processing states now.
 Claim an awaiting document/version atomically and enqueue one validation job.
 Duplicates and concurrent API/worker instances must not regress status or
 process a different version. Run the worker separately from the HTTP server,
-with bounded concurrency (initially two jobs), three retries for transient
-storage/database errors, and backoff. After retry exhaustion, persist `failed`
-with a safe error. Jobs and pending work must survive API/worker restarts;
-shutdown must stop accepting work and close clients cleanly.
+with bounded concurrency (initially two jobs) and the operation-specific
+[retry policy](#retry-timing-and-stop-conditions). Jobs and pending work must
+survive API/worker restarts; shutdown must stop accepting work and close clients
+cleanly.
 
 For each job, read the recorded version with a strict byte cap; compare its
 actual size/type against the reservation. Require a PDF signature and successful
@@ -211,7 +247,10 @@ fixtures and mocked dependencies; `npm test` requires no Docker or credentials.
 Type-check tests without emitting them into the production build. Cover metadata
 and policy limits, exact 10 MiB acceptance, invalid PDF variants, webhook auth,
 unknown/duplicate/out-of-order events, status/error responses, immutable-version
-selection, retries, recovery/expiry, and promotion/cleanup crash recovery.
+selection, retry delays/attempt limits/deadlines with a fake clock, recovery/expiry,
+and promotion/cleanup crash recovery. Assert that a confirmed copy is not
+repeated during finalization/cleanup retries, that exhausted finalization retains
+both copies, and that exhausted cleanup preserves an `uploaded` status.
 
 Run separate PostgreSQL/MinIO integration checks against Docker: migrations and
 transaction rollback, concurrent webhook deduplication, actual signed uploads,
