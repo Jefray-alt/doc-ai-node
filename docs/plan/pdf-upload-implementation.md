@@ -19,7 +19,8 @@ without implementing a frontend client.
 2. **MinIO and PostgreSQL setup:** Add Compose, private staging/accepted buckets,
    staging versioning, signed POST policies, notification authentication/queue,
    scoped signer/worker credentials, origin configuration, and repeatable
-   initialization.
+   initialization. Explicitly configure MinIO's stale-upload expiry/cleanup scan
+   cadence from the design's [interrupted-upload cleanup](pdf-upload-design.md#interrupted-uploads-and-automatic-cleanup).
 3. **API contracts:** Add the JSON upload-reservation endpoint, authenticated
    MinIO event receiver, and status endpoint; preserve health behavior. Test
    metadata validation, durable enqueueing, deduplication, and sanitized errors.
@@ -33,7 +34,8 @@ without implementing a frontend client.
    finalization/cleanup retries do not repeat a confirmed successful copy.
 5. **Integration verification and documentation:** Exercise signed uploads,
    real notifications, worker processing, database/storage restarts, replayed
-   uploads, private access, and initializer reruns. Document backend commands,
+   uploads, interrupted signed POSTs and cleanup, private access, and initializer
+   reruns. Document backend commands,
    configuration, and actual results; update the roadmap.
 
 This is the scope/sequence for review, not an executable task checklist. After

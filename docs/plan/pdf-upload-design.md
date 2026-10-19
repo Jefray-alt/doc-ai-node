@@ -217,6 +217,38 @@ versions at least through validation/retry; delete them after terminal handling.
 Retry failed cleanup and remove abandoned/replayed versions after 24 hours.
 Session-based retention of accepted PDFs remains a later feature-2 decision.
 
+## Interrupted uploads and automatic cleanup
+
+The signed POST uses one HTTP request containing a multipart form; it is not
+the S3 multipart-upload protocol with separately uploaded, resumable parts. A
+failed/incomplete request does not produce a completed PDF object for validation.
+If all bytes were committed before the browser disconnected, handle it as a
+completed upload through the webhook/recovery flow instead.
+
+Cleanup has three owners:
+
+- **PostgreSQL reservation:** The existing one-minute recovery job checks for a
+  completed object before marking an unused reservation `expired` after its
+  30-minute upload permission expires. It does not need a browser callback.
+- **Internal temporary bytes:** MinIO owns these, including leftovers after an
+  interrupted write or server crash. Explicitly configure
+  `MINIO_API_STALE_UPLOADS_EXPIRY=24h` and
+  `MINIO_API_STALE_UPLOADS_CLEANUP_INTERVAL=1h`. These are age eligibility and
+  scan cadence, not a promise of deletion exactly 24 hours after interruption.
+  MinIO performs final internal deletion asynchronously. Application code must
+  not manually remove files from MinIO's internal data directories.
+- **Completed but abandoned staging versions:** The application's 24-hour
+  maintenance sweep removes only versions no longer needed by active validation
+  or reconciliation. This is separate from MinIO's temporary-data cleanup and
+  must preserve sources still required to recover a copied document.
+
+Include an interrupted signed-POST integration check: abort the transfer before
+the declared PDF byte count arrives, confirm no completed object is published
+or validation job created, and advance the application clock to verify
+reservation expiry. Check MinIO's configured cleanup settings and exercise stale
+temporary-data cleanup with accelerated settings only in an isolated test
+instance; do not wait a day or change a user's running data volume for this test.
+
 ## Local infrastructure and module boundaries
 
 Root `compose.yaml` runs MinIO, its one-shot initializer, and PostgreSQL. Use
@@ -271,4 +303,6 @@ complete.
 - [MinIO signed POST policy](https://github.com/minio/minio-js/blob/master/examples/presigned-postpolicy.mjs)
 - [MinIO bucket events and webhooks](https://github.com/minio/minio/blob/master/docs/bucket/notifications/README.md)
 - [MinIO server-side object copy](https://github.com/minio/minio-js/blob/master/examples/copy-object.mjs)
+- [MinIO stale-upload cleanup settings](https://github.com/minio/minio/blob/master/docs/config/README.md)
+- [MinIO internal temporary/upload cleanup](https://github.com/minio/minio/blob/master/cmd/erasure-multipart.go)
 - [PostgreSQL-backed job queue](https://github.com/timgit/pg-boss)
