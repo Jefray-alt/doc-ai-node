@@ -8,7 +8,7 @@ This is a lightweight, outcome-oriented roadmap for a solo learning project. It 
 
 **Feature:** Single-PDF grounded chat with cited pages and source excerpts.
 
-**Status:** Product brief and MVP scope approved. Requirements, design, and tasks are to be detailed for the current feature before implementation.
+**Status:** Product brief and MVP scope approved. Frontend foundation initialized in `frontend/` with React, TypeScript, Vite, and Mantine. Node configuration, package manifests, dependencies, and the lockfile live inside `frontend/`. The chat workspace and backend remain to be implemented; this setup does not complete the MVP feature.
 
 ## Next
 
