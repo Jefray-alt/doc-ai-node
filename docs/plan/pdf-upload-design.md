@@ -1,7 +1,7 @@
 # Direct PDF upload: backend and MinIO
 
-**Status:** Direct-upload/webhook direction, PostgreSQL, and two buckets approved in chat.
-This revised written spec awaits review. It replaces the previous synchronous
+**Status:** Revised written design and backend scope approved. The detailed
+implementation checklist awaits review. This replaces the previous synchronous
 multipart upload design. Only backend and infrastructure work is current;
 there is no frontend integration plan in this slice.
 
