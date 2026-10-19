@@ -12,6 +12,8 @@ This is a lightweight, outcome-oriented roadmap for a solo learning project. It 
 
 **Backend progress:** The REST API foundation for backlog feature 2 is initialized in `backend/` with Express, TypeScript, and `GET /health`. Each application owns its Node configuration, package manifest, dependencies, and lockfile. PDF upload, session handling, and frontend/backend integration remain pending.
 
+**Feature 2 planning:** The current slice is backend and local infrastructure: direct-to-MinIO upload instructions, upload notifications, PostgreSQL-backed status/jobs, and background PDF validation. See the [revised design](plan/pdf-upload-design.md) and [backend plan scope](plan/pdf-upload-implementation.md). The revised written design awaits review; implementation has not started. Frontend integration is deferred, with no frontend plan created.
+
 **Validation:** Type checking, linting, and the production build pass. Browser checks cover message submission, multiline and IME input, blank-message rejection, scrolling, PDF availability dialog and focus, refresh reset, and mobile layouts at 320px and 390px.
 
 ## Next
