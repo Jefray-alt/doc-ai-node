@@ -1,7 +1,7 @@
 # PDF upload and local MinIO
 
-**Status:** Design approved in chat; written spec awaiting review. Includes the
-requested backend unit tests. Implementation planning follows spec approval.
+**Status:** Written spec approved. Includes the requested backend unit tests.
+Implementation plan awaiting review.
 
 ## Outcome and boundary
 
@@ -50,7 +50,9 @@ and cleanup will be designed when session attachment is implemented.
 ## Local infrastructure
 
 Add a root `compose.yaml` running MinIO with a named data volume, API port 9000,
-and console port 9001, both bound to localhost. Use pinned container releases.
+and console port 9001, both bound to localhost. Use pinned releases; build local
+images from pinned upstream source releases because the community server is now
+[distributed as source only](https://github.com/minio/minio#source-only-distribution).
 Include a one-shot initialization service that waits for MinIO, creates the
 configured bucket idempotently, and ensures anonymous access is disabled.
 Initialization failures must be visible rather than silently ignored.
