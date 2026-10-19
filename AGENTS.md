@@ -10,12 +10,12 @@
 2. Generate features based on the approved product brief.
 3. Prioritize features before creating the roadmap.
 4. Only detail the current feature for implementation.
-5. Use OpenSpec for requirements, design, and tasks.
-6. After an OpenSpec change is archived, update the roadmap.
+5. Keep requirements, design, and tasks lightweight and focused on the current feature.
+6. After a feature is completed, update the roadmap.
 
 ## Guardrails
 - Never start coding during product planning.
 - Ask for approval before changing MVP scope.
-- Do not duplicate detailed OpenSpec requirements in planning docs.
+- Do not duplicate detailed implementation requirements in planning docs.
 - Do not automatically implement the next feature.
 - Keep documentation lightweight for solo projects.
