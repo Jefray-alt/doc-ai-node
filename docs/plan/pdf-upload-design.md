@@ -1,6 +1,6 @@
 # Direct PDF upload: backend and MinIO
 
-**Status:** Direct-upload/webhook direction and PostgreSQL approved in chat.
+**Status:** Direct-upload/webhook direction, PostgreSQL, and two buckets approved in chat.
 This revised written spec awaits review. It replaces the previous synchronous
 multipart upload design. Only backend and infrastructure work is current;
 there is no frontend integration plan in this slice.
@@ -42,9 +42,10 @@ status/error responses. The upload form necessarily includes its permitted key.
 
 ## MinIO upload and notification configuration
 
-Create private `staging` and `documents` buckets. Generate the staging key from
-the document UUID, not the supplied filename. Issue a signed POST policy for
-that exact bucket/key, declared content type, and exact declared byte size,
+Create private `staging` and `documents` buckets. Use `<id>.pdf` as the object key
+in each bucket, where `<id>` is the document UUID, not the supplied filename.
+Issue a signed POST policy for that exact bucket/key, declared content type,
+and exact declared byte size,
 within the 10 MiB maximum. Upload permission expires after 30 minutes. Store
 the original filename in PostgreSQL; use header-safe encoded metadata when
 writing the accepted object. Configure CORS for explicitly configured browser
@@ -65,6 +66,79 @@ keys according to S3 notification encoding. Duplicate or irrelevant events
 receive a harmless 204; malformed authenticated payloads receive 400. Database
 failure returns 503 so delivery can be retried. Do not promise exactly-once or
 lossless delivery; add recovery as described below.
+
+## Concrete bucket operations
+
+For a user selecting `report.pdf`, PostgreSQL records the original filename and
+the generated document UUID. The bucket contains a named object (the PDF bytes
+plus metadata); it does not run validation or ingestion code. The worker runs
+that code. The same `<id>.pdf` key can exist in both buckets temporarily.
+
+```mermaid
+flowchart TD
+    Reserve["API creates document ID and signed upload instructions"]
+    Upload["Client uploads PDF directly to MinIO"]
+    Staging[("staging bucket: unvalidated PDF version")]
+    Event["MinIO sends object-created webhook"]
+    Queue["API authenticates event and durably queues validation in PostgreSQL"]
+    Validate["Worker reads the recorded staging version and validates its PDF bytes"]
+    Valid{"Valid PDF?"}
+    Reject["Record failed in PostgreSQL and delete rejected staging version"]
+    Copy["Worker requests server-side copy of validated version"]
+    Copied{"Copy successful?"}
+    Retry["Keep staging version and retry with backoff"]
+    Exhausted["Retries exhausted: record failed and schedule staging cleanup"]
+    Documents[("documents bucket: accepted PDF")]
+    Record["Record uploaded in PostgreSQL"]
+    Delete["Delete staging version; retry cleanup if needed"]
+    Later["Later feature: ingestion reads accepted PDF"]
+
+    Reserve --> Upload --> Staging --> Event --> Queue --> Validate --> Valid
+    Staging -. "Read exact version" .-> Validate
+    Valid -- No --> Reject
+    Valid -- Yes --> Copy --> Copied
+    Copied -- No --> Retry
+    Retry -- "Attempts remain" --> Copy
+    Retry -- "Exhausted" --> Exhausted
+    Copied -- Yes --> Documents --> Record
+    Record --> Delete
+    Record -. "Future work" .-> Later
+    Documents -. "Read bytes" .-> Later
+```
+
+Solid arrows show the current flow; dotted arrows show a storage read or
+future work. The bucket stores bytes, the worker validates them, and PostgreSQL
+stores progress. Ingestion is shown only to explain the accepted bucket's
+purpose; it is not implemented in this slice. If the copy succeeds but the
+database update fails, retry from that point without losing the staging source.
+
+| Step | Actor and operation | `staging` bucket | `documents` bucket |
+|---|---|---|---|
+| 1. Reserve upload | API records the reservation and signs a POST policy. | No object is created by issuing upload instructions. | No change. |
+| 2. Upload bytes | Client sends a signed POST to MinIO. | Creates `<id>.pdf`; versioning assigns a version ID. | No change. |
+| 3. Notify | MinIO POSTs the creation event to our webhook; API queues validation in PostgreSQL. | Existing object stays in place. The event contains metadata, not the PDF bytes. | No change. |
+| 4. Inspect | Worker stats and reads the recorded object version, then checks size and parses the PDF in its own process. | Read only during validation. | No change. |
+| 5. Accept | Worker requests a server-side `CopyObject` from that exact validated version. | Original remains until cleanup. | Creates `<id>.pdf` with the validated bytes and safe filename/content-type metadata. |
+| 6. Record success | After the copy succeeds, worker records the accepted key and `uploaded` status in PostgreSQL. | No change. | Accepted object is now eligible for later ingestion. |
+| 7. Clean up | Worker deletes the exact staging version. | Removes the temporary copy; cleanup failure is retried. | Accepted object remains. |
+| If validation fails | Worker records `failed` and deletes the rejected staging version. | Rejected bytes are removed; cleanup failure is retried. | No object is copied here. |
+
+The effective move is **copy, record success, then delete the source version**.
+It is not an atomic filesystem rename. The copy happens within MinIO, so the
+client uploads only once. If the copy fails, keep the staging version for retry;
+if cleanup fails after success, leave the accepted document available and retry
+cleanup. A worker restart must also recover a copy that succeeded before its
+database update committed.
+
+Use separate scoped runtime credentials: the API upload signer can authorize
+writes only to `staging`; the validation worker can inspect/delete staging
+versions and write accepted objects to `documents`. Reserve administrative
+credentials for infrastructure initialization. Later ingestion will receive
+read access to `documents` only; implementing ingestion remains deferred.
+
+After successful cleanup, the PDF exists only in `documents`. Future feature-3
+work will read it there to extract text, split it into passages, and generate
+embeddings. Those outputs are not part of the bucket operations in this slice.
 
 ## Durable status and validation
 
@@ -94,7 +168,7 @@ PDF parsing, rejecting empty, malformed, encrypted, spoofed, and oversized data.
 This is the authoritative content check. Frontend validation, when introduced,
 provides feedback but cannot establish that arbitrary clients uploaded a PDF.
 
-Copy validated bytes to `documents/<id>.pdf` in the accepted bucket before
+Copy validated bytes to key `<id>.pdf` in the `documents` bucket before
 marking the record `uploaded`. Invalid files become `failed` and their staging
 version is deleted. Make promotion/status updates and cleanup safe to retry;
 a crash between object storage and a database update must be recoverable.
@@ -123,9 +197,10 @@ host API. Document API listening address and startup sequencing so MinIO can
 reach the callback without deadlocking API/infrastructure startup.
 
 Provide root/backend example environment files for local database credentials,
-MinIO internal and browser-accessible endpoints, bucket names, allowed origin,
-and webhook secret. Keep local environment files untracked. Preserve the
-application/server split; inject storage, repository, queue, and clock boundaries
+scoped MinIO signer/worker credentials, internal and browser-accessible
+endpoints, bucket names, allowed origin, and webhook secret. Keep local
+environment files untracked. Preserve the application/server split; inject
+storage, repository, queue, and clock boundaries
 for tests. Separate HTTP handling, persistence/migrations, MinIO operations,
 PDF validation, and worker orchestration into focused backend modules.
 
@@ -142,7 +217,8 @@ Run separate PostgreSQL/MinIO integration checks against Docker: migrations and
 transaction rollback, concurrent webhook deduplication, actual signed uploads,
 storage-side size-policy rejection, webhook delivery, worker outcomes, status
 polling, version replay, CORS, private bucket access, restart recovery, and
-idempotent initialization. Verify bytes/metadata of the accepted object. Run
+idempotent initialization. Verify the signer cannot read staging objects or
+write accepted objects; verify bytes/metadata of the accepted object. Run
 backend tests/type checking/lint/build and Compose validation; report blocked
 checks explicitly. No frontend implementation or browser UI is needed to prove
 the backend flow; use HTTP scripts and SDK assertions.
@@ -155,4 +231,5 @@ complete.
 
 - [MinIO signed POST policy](https://github.com/minio/minio-js/blob/master/examples/presigned-postpolicy.mjs)
 - [MinIO bucket events and webhooks](https://github.com/minio/minio/blob/master/docs/bucket/notifications/README.md)
+- [MinIO server-side object copy](https://github.com/minio/minio-js/blob/master/examples/copy-object.mjs)
 - [PostgreSQL-backed job queue](https://github.com/timgit/pg-boss)

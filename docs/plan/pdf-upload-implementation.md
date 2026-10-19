@@ -18,13 +18,16 @@ without implementing a frontend client.
    automated unit tests independent of Docker.
 2. **MinIO and PostgreSQL setup:** Add Compose, private staging/accepted buckets,
    staging versioning, signed POST policies, notification authentication/queue,
-   origin configuration, and repeatable initialization.
+   scoped signer/worker credentials, origin configuration, and repeatable
+   initialization.
 3. **API contracts:** Add the JSON upload-reservation endpoint, authenticated
    MinIO event receiver, and status endpoint; preserve health behavior. Test
    metadata validation, durable enqueueing, deduplication, and sanitized errors.
 4. **Validation worker:** Read the recorded object version, enforce the 10 MiB
-   limit and actual PDF validation, promote accepted bytes, and persist terminal
-   outcomes. Cover retry/restart safety, reservation recovery, and cleanup.
+   limit and actual PDF validation, copy valid bytes to the accepted bucket,
+   record success, then delete the staging version. Cover retry/restart safety,
+   reservation recovery, and cleanup. See the design's [concrete bucket
+   operations](pdf-upload-design.md#concrete-bucket-operations).
 5. **Integration verification and documentation:** Exercise signed uploads,
    real notifications, worker processing, database/storage restarts, replayed
    uploads, private access, and initializer reruns. Document backend commands,
