@@ -1,0 +1,16 @@
+.fileInput {
+  height: auto;
+  min-height: var(--input-height);
+  padding-block: 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+
+  &:disabled {
+    color: var(--mantine-color-gray-7);
+    opacity: 1;
+  }
+}
+
+.status {
+  overflow-wrap: anywhere;
+}

@@ -53,3 +53,9 @@ export interface PdfUploadController {
   startUpload: () => Promise<void>
   cancelUpload: () => void
 }
+
+export interface PdfUploadProps {
+  opened: boolean
+  onClose: () => void
+  upload: PdfUploadController
+}

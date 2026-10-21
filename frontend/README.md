@@ -43,7 +43,22 @@ completion waits for the successful storage response. Authorization has a
 15-second timeout and storage a 120-second timeout. Failures expose safe messages
 without signed URLs; callers should not log raw Axios errors or authorizations.
 The workspace owns `src/components/PdfUpload/usePdfUpload.ts`, which calls these
-helpers. The rendered selection/upload interface is the next task.
+helpers, and renders the Mantine upload dialog in the same component folder.
+
+Choose **Add PDF**, select a file with the labelled **PDF file** picker, then
+choose **Upload PDF**. Selecting a file does not start a request. The dialog shows
+metadata errors beside the picker; correct the selection before uploading.
+It shows authorization, indeterminate transfer or percentage progress, then waits
+for storage confirmation even after 100 percent of bytes have transferred.
+The picker and duplicate upload actions are unavailable during the attempt.
+
+Use **Cancel upload** to abort an active request, or close the dialog with its
+close button, Escape, or the backdrop; closing cancels active work first.
+After failure or cancellation, **Retry upload** starts a fresh attempt, and the
+picker also allows another candidate. On completion, the filename and
+**Uploaded; not ready for questions** remain in the workspace. **View upload**
+reopens that result with selection and upload actions unavailable until refresh.
+The message composer stays available throughout and does not generate answers.
 
 The controller checks candidate metadata before requesting authorization: a
 nonempty `.pdf` filename (case-insensitive), a positive integer size up to and
@@ -73,7 +88,8 @@ An uploaded file is **not ready for questions**. This controller does not valida
 PDF bytes, promote objects, start processing or persist server sessions. Existing
 chat composition remains available without generating answers.
 
-Run the transport/controller tests and frontend checks from this folder:
+Run the Vitest transport, controller and rendered workspace tests, plus frontend
+checks, from this folder:
 
 ```sh
 npm test
