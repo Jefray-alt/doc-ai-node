@@ -4,7 +4,7 @@ Apply serially through the project's TDD developer/independent reviewer workflow
 
 ## 1. Backend signing contract
 
-- [ ] 1.1 Add backend AWS SDK dependencies and validated Moto/AWS storage configuration with an injectable signing component; document environment settings in `backend/.env.example` and `backend/README.md`. Verify tests cover local endpoint rejection, explicit dummy credentials without profile fallback, AWS configuration without local overrides, unique staging keys, required headers, and five-minute expiration; run backend typecheck/lint/build. No real AWS calls are required.
+- [x] 1.1 Add backend AWS SDK dependencies and validated Moto/AWS storage configuration with an injectable signing component; document environment settings in `backend/.env.example` and `backend/README.md`. Verify tests cover local endpoint rejection, explicit dummy credentials without profile fallback, AWS configuration without local overrides, unique staging keys, required headers, and five-minute expiration; run backend typecheck/lint/build. No real AWS calls are required.
 - [ ] 1.2 After 1.1, add `POST /api/uploads/presign` with bounded JSON parsing, candidate metadata checks, the designed success/error contract, and safe failure handling; document the endpoint. Verify HTTP tests cover accepted/normalized metadata, invalid types/extensions/sizes/media types, malformed and oversized JSON, refusal of client-controlled targets, signing failures without secret leakage, and unchanged `/health`; run backend tests/typecheck/lint/build.
 
 ## 2. Browser HTTP transport

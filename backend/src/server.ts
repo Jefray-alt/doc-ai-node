@@ -1,4 +1,7 @@
 import { app } from './app.ts';
+import { readStorageConfig } from './storage/config.ts';
+
+readStorageConfig();
 
 const port = Number(process.env.PORT ?? 3000);
 
