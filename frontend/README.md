@@ -13,7 +13,7 @@ npm run dev
 See the [root README](../README.md) for the available development and build commands.
 
 - `src/main.tsx`: React entry point, Mantine provider, and global styles.
-- `src/App.tsx`: minimal starter screen; the PDF chat workspace is a later step.
+- `src/App.tsx`: composition of the in-memory PDF chat workspace.
 - `postcss.config.cjs`: Mantine CSS features and responsive breakpoint variables.
 
 Use [Mantine](https://mantine.dev/) components and hooks as the UI foundation.
@@ -42,9 +42,38 @@ The helpers accept an `AbortController` signal and optional transfer progress;
 completion waits for the successful storage response. Authorization has a
 15-second timeout and storage a 120-second timeout. Failures expose safe messages
 without signed URLs; callers should not log raw Axios errors or authorizations.
-The workspace interface will connect to these helpers in the next task.
+The workspace owns `src/components/PdfUpload/usePdfUpload.ts`, which calls these
+helpers. The rendered selection/upload interface is the next task.
 
-Run the transport tests and frontend checks from this folder:
+The controller checks candidate metadata before requesting authorization: a
+nonempty `.pdf` filename (case-insensitive), a positive integer size up to and
+including 10 MiB, and `application/pdf` or an empty media type. Empty media types
+become `application/pdf`. These are candidate checks, not PDF content validation
+or storage-enforced size limits.
+
+Its normal transition is `idle → selected → requesting → uploading → uploaded`.
+Authorization or storage failure produces `failed`; cancelling either active
+request produces `cancelled` and aborts its signal. Retrying a
+failed or cancelled attempt requests fresh authorization and a new storage target.
+Selection is allowed before starting or after failure/cancellation. Duplicate
+submissions and replacement selections are blocked while an attempt is active.
+Progress can be indeterminate; 100 percent still waits for storage success.
+Late responses and progress cannot update cancelled, superseded or unmounted
+controllers. Failures contain safe, actionable messages without signed URLs.
+
+Closing the dialog preserves a completed upload and its filename because the
+controller belongs to the workspace. Closing during an active attempt cancels it.
+One completed document occupies the workspace slot and prevents another upload.
+Refresh or remount clears this in-memory state and permits another selection.
+Cancellation does not guarantee deletion of an object storage may already have
+accepted, and refreshing does not delete stored objects. This is a browser
+interaction limit, not a server-enforced session attachment guarantee.
+
+An uploaded file is **not ready for questions**. This controller does not validate
+PDF bytes, promote objects, start processing or persist server sessions. Existing
+chat composition remains available without generating answers.
+
+Run the transport/controller tests and frontend checks from this folder:
 
 ```sh
 npm test

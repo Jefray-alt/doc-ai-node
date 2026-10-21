@@ -26,3 +26,30 @@ export interface StorageUploadOptions extends UploadRequestOptions {
 }
 
 export type UploadErrorCode = 'cancelled' | 'timeout' | 'authorization' | 'storage'
+
+export type PdfUploadStatus =
+  | 'idle'
+  | 'selected'
+  | 'requesting'
+  | 'uploading'
+  | 'uploaded'
+  | 'failed'
+  | 'cancelled'
+
+export interface PdfUploadState {
+  status: PdfUploadStatus
+  file: File | null
+  progress: number | null
+  error: string | null
+}
+
+export interface PdfUploadAttempt {
+  controller: AbortController
+}
+
+export interface PdfUploadController {
+  state: PdfUploadState
+  selectFile: (file: File) => boolean
+  startUpload: () => Promise<void>
+  cancelUpload: () => void
+}
