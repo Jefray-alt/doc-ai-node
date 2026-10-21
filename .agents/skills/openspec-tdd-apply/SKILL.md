@@ -11,9 +11,15 @@ and review to a separate `openspec_tdd_reviewer`. Read
 requests subagent delegation; it does not authorize publishing, pushing, or
 changing the plan's scope.
 
+This skill contains Markdown instructions only. Use normal Git, OpenSpec and
+project test commands directly. Do not create or depend on a replacement helper
+script, hook, runtime state file, or automated gate for this workflow. The
+orchestrator is responsible for checking the protocol and retaining evidence in
+the conversation; these rules are not mechanically enforced.
+
 Use the installed OpenSpec apply skill for change discovery, root resolution,
-status, context, and readiness checks. Replace its implementation loop with the
-protocol here. Do not start both loops or mark tasks done early.
+status, context, and readiness checks. Replace its implementation loop with this
+protocol. Do not start both loops or mark tasks done early.
 
 Get current `openspec status --change <name> --json` and
 `openspec instructions apply --change <name> --json`. Stop on command errors,
@@ -22,42 +28,45 @@ Read the returned context files and apply relevant project context and guidance.
 Select an unambiguous change; announce its name and current progress.
 
 Before any writes, require a clean Git root with committed planning and workflow
-files. Resolve every task's returned `sourcePath` and one-based `line`, verify
-the unchecked text, and refresh instructions if it moved. All implementation and
-tracking files must belong to this same Git repository. External stores,
-submodules, sparse checkouts, symlinked task files, and hidden Git index entries
-are unsupported: stop and explain. Never stash, discard, reset, or absorb user
-work automatically.
+files. Resolve each task's returned `sourcePath` and one-based `line`, verify the
+unchecked text, and refresh instructions if it moved. Code and tracking files
+must belong to the same Git repository. External stores, submodules, sparse
+checkouts, symlinked task files and hidden index entries are unsupported. Never
+stash, discard, reset, or absorb user work automatically.
 
 For each task, serially:
 
-1. Agree on behavior, test commands, and exact relevant files from the approved
-   artifacts. Start `scripts/task_guard.py begin` from the repository root.
-2. Spawn a developer with only this task and the relevant project context.
-   Require an observed behavioral RED before production edits, then GREEN,
-   then REFACTOR and passing final checks. Use the guard to record real commands.
-3. Wait for the developer to finish; freeze edits and obtain the guard snapshot.
-   Spawn a fresh independent reviewer. Supply requirements, the base commit,
-   candidate digest, diff including new files, and TDD logs. Do not supply a
-   suggested verdict or the developer's persuasive summary.
-4. Register its report with the guard. Allow at most **three review rounds
-   total** (initial review plus two correction rounds). Send concrete findings
-   to the developer; rerun checks and get a new review after every correction.
+1. Check the clean working tree and empty index. Record HEAD, exact unchecked
+   task, acceptance criteria, relevant file list and test commands in the
+   conversation. Do not begin another task or allow concurrent writers.
+2. Spawn a developer with only this task and relevant project context. Require
+   observed behavioral RED before production edits, then GREEN with the same
+   focused command, then REFACTOR and passing final checks. Retain actual command
+   output and exit statuses; summaries alone do not establish TDD.
+3. Wait for the developer to finish and freeze writes. Capture the complete
+   candidate: tracked diff plus the list, content and modes of new files. Spawn
+   a fresh independent reviewer with raw requirements, base commit, exact
+   candidate and test evidence, without a suggested verdict or developer pitch.
+4. Record its Markdown verdict and findings in the conversation. Allow at most
+   **three review rounds total** (initial review plus two correction rounds).
+   Send findings to the developer; rerun checks and review the revised candidate.
    A blocked review, missing evidence, unavailable subagents, or exhausted budget
-   stops the task. Preserve the unchecked task and work for recovery.
-5. On a current independent PASS, stop/wait for all task agents, inspect the
-   allowlist and exact candidate, and use guard `commit`. The guard changes only
-   this checkbox and stages only this task's files. Developers/reviewers must
-   never stage, commit, or modify tracking files.
-6. Verify the resulting commit and clean working tree. Refresh OpenSpec apply
-   instructions, confirm the task is complete, and continue to the next task.
+   stops the task. Preserve the unchecked task and working files for recovery.
+5. On a current independent PASS, stop/wait for all task agents and compare HEAD,
+   candidate contents and modes against what was reviewed. Any change requires
+   fresh checks and review within the same budget. Only the orchestrator checks
+   this task's checkbox, stages its explicit files, inspects the staged diff,
+   and makes one commit. Developers/reviewers never stage, commit, or edit tasks.
+6. Verify the commit's parent, complete contents, single checkbox change and clean
+   working tree. Refresh OpenSpec apply instructions, confirm completion, then
+   continue to the next task in this change.
 
-Only the orchestrator commits. One successful task means one commit containing
-its code, tests, required supporting files, and exactly its checkbox. No WIP/RED
-commits, bulk staging, amend, auto-stash, auto-push, or bypassing hooks. If a hook
-changes files or a commit fails, stop for recovery; never retry blindly.
+One successful task means one commit containing its code, tests, required
+supporting files and exactly its checkbox. No WIP/RED commits, bulk staging,
+amend, auto-stash, auto-push or bypassing hooks. A failed commit or hook that
+changes files requires recovery inspection; never retry blindly.
 
 Report completed tasks with commit hashes, test evidence, review rounds, current
-OpenSpec progress, and any blocker. Suggest verification/archive after completion;
-do not archive automatically. Do not claim behavioral TDD or independent review
-unless the actual execution evidence supports it.
+OpenSpec progress and blockers. Suggest verification/archive after completion;
+do not archive automatically. Do not claim TDD or independent review without
+actual evidence, or describe this written protocol as an automated guarantee.
