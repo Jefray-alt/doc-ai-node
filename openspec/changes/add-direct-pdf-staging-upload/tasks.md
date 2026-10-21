@@ -9,7 +9,7 @@ Apply serially through the project's TDD developer/independent reviewer workflow
 
 ## 2. Browser HTTP transport
 
-- [ ] 2.1 After 1.2, add Axios with separate backend and storage instances, typed authorization/raw-file upload helpers, progress and cancellation signals, bounded timeouts, Vite `/api` proxy, and documented frontend environment configuration. Verify transport tests exercise the API contract, exact raw file/header forwarding, isolation from API authorization/defaults/interceptors, cancellation and storage failures without URL leakage; run frontend typecheck/lint/build. Colocate upload types with their owning component/domain.
+- [x] 2.1 After 1.2, add Axios with separate backend and storage instances, typed authorization/raw-file upload helpers, progress and cancellation signals, bounded timeouts, Vite `/api` proxy, and documented frontend environment configuration. Verify transport tests exercise the API contract, exact raw file/header forwarding, isolation from API authorization/defaults/interceptors, cancellation and storage failures without URL leakage; run frontend typecheck/lint/build. Colocate upload types with their owning component/domain.
 
 ## 3. Workspace upload interaction
 
