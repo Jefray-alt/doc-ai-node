@@ -1,32 +1,20 @@
 schema: spec-driven
 
-# Project context (optional)
-# Add only constraints that should guide OpenSpec artifacts and workflows.
-# Include constraints an agent cannot infer by reading the code.
-# Keep general project documentation and discoverable codebase facts out.
-# Example:
-#   context: |
-#     Designs and tasks must cover Windows, macOS, and Linux
-#     Write all artifacts in Spanish
+context: |
+  Prefer changes that a reviewer can understand independently.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always state what is out of scope
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  During exploration and planning, assess whether the requested
+  scope is likely to produce a large or difficult-to-review change.
+  Flag multiple independent outcomes, new infrastructure, background
+  processing, data migrations, and cross-cutting refactors early.
 
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
-#   operations:
-#     apply:
-#       guidance:
-#         - Keep test summaries concise
-#     archive:
-#       guidance:
-#         - Summarize the archive outcome before finishing
+  When scope looks broad, explain why and propose smaller changes
+  with clear outcomes and dependencies before detailing the full plan.
+
+rules:
+  proposal:
+    - Include a brief review-scope assessment covering affected areas, new dependencies, uncertainty, and whether splitting is recommended.
+  design:
+    - Reassess review scope as implementation complexity becomes clearer.
+  tasks:
+    - Identify independently reviewable delivery slices and their dependencies.
