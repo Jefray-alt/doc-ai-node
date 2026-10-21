@@ -67,3 +67,9 @@ Then use `npm start` to run the compiled API. See [backend/README.md](backend/RE
 
 PDF upload, generated answers, and frontend/backend integration remain to be
 implemented.
+
+### Local object storage
+
+Run `./infra/moto/up.sh` to start disposable local S3 storage and provision its
+buckets. See [the Moto setup guide](infra/moto/README.md) for Docker requirements,
+endpoints, dummy credentials, checks, and restart/reset behavior.

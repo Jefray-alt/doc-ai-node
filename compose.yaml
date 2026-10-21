@@ -1,0 +1,51 @@
+services:
+  moto:
+    image: &moto-image motoserver/moto:5.2.4@sha256:120b1589c6df7e35d2092935f6ff724486bb2c4189d0e36ce795baba1400ffd2
+    # Werkzeug request logs include signed query strings. Keep them out of logs.
+    entrypoint:
+      - python
+      - -c
+      - >-
+        import logging; logging.getLogger('werkzeug').disabled = True;
+        from moto.server import main; main(['-H', '0.0.0.0'])
+    ports:
+      - "127.0.0.1:5000:5000"
+    environment: &local-aws
+      AWS_ACCESS_KEY_ID: moto-local
+      AWS_SECRET_ACCESS_KEY: moto-local-secret
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+      AWS_SHARED_CREDENTIALS_FILE: /dev/null
+      AWS_CONFIG_FILE: /dev/null
+      MOTO_PORT: "5000"
+      S3_IGNORE_SUBDOMAIN_BUCKETNAME: "true"
+      MOTO_DISABLE_GLOBAL_CORS: "true"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import boto3; from botocore.config import Config;
+          boto3.client('s3', endpoint_url='http://localhost:5000',
+          region_name='us-east-1', aws_access_key_id='moto-local',
+          aws_secret_access_key='moto-local-secret',
+          config=Config(connect_timeout=2, read_timeout=2,
+          retries={'total_max_attempts': 1}, proxies={},
+          s3={'addressing_style': 'path'})).list_buckets()
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  tools:
+    image: *moto-image
+    profiles: [tools]
+    entrypoint: [python, /tools/moto_local.py]
+    environment:
+      <<: *local-aws
+      MOTO_ENDPOINT: http://moto:5000
+      MOTO_HOST_ENDPOINT: http://localhost:5000
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
+    volumes:
+      - ./infra/moto:/tools:ro
