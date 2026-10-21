@@ -78,7 +78,60 @@ provisioning, role assignment, bucket CORS, and actual permission/signature
 allow/deny checks remain deployment work. The separate backend-access policy
 does not need staging writes. Signing success alone does not prove storage is
 reachable or a bucket exists. Never log signing exceptions, credentials, or
-signed URLs. The API endpoint and direct browser transfer are subsequent slices.
+signed URLs. The direct browser transfer is a subsequent slice.
+
+## Upload authorization endpoint
+
+`POST /api/uploads/presign` accepts `Content-Type: application/json` with only
+these three metadata fields:
+
+```json
+{
+  "filename": "document.pdf",
+  "size": 1024,
+  "contentType": "application/pdf"
+}
+```
+
+The filename must be nonempty and end in `.pdf` (case-insensitive). Size must be
+a positive integer no greater than 10 MiB (10485760 bytes). `contentType` must
+be `application/pdf` or an empty string, which is normalized to `application/pdf`.
+The JSON body is limited to 4 KiB (4096 bytes). Unknown fields, including client
+bucket/key targets and file bytes, are rejected. These are declared candidate
+metadata checks; they do not validate PDF contents or enforce the object's size
+in storage.
+
+For example, from a second terminal after starting the API:
+
+```sh
+curl -i http://localhost:3000/api/uploads/presign \
+  -H 'Content-Type: application/json' \
+  --data '{"filename":"document.pdf","size":1024,"contentType":"application/pdf"}'
+```
+
+HTTP 201 returns `{ uploadId, method, url, headers, expiresAt }`. `method` is
+`PUT`; `url` targets a unique server-generated `uploads/<uuid>.pdf` key in the
+configured staging bucket, independent of the supplied filename. `headers`
+contains `Content-Type: application/pdf` and all required browser-settable
+signature headers. `expiresAt` is an ISO timestamp five minutes after signing.
+Send the raw file directly to storage using the returned URL and headers;
+never log or share the signed response.
+
+Errors always have the JSON shape `{ "error": { "code": "...", "message": "..." } }`:
+
+| HTTP status | Code | Meaning |
+| --- | --- | --- |
+| 400 | `INVALID_UPLOAD_METADATA` | Invalid, missing, or unexpected metadata fields |
+| 400 | `INVALID_JSON` | Malformed JSON or unsupported request media type/encoding |
+| 413 | `JSON_TOO_LARGE` | JSON body exceeds 4096 bytes |
+| 503 | `SIGNING_UNAVAILABLE` | Signing failed; request a fresh authorization to retry |
+
+Signing errors expose no exception, credentials, or signed URL. Empty JSON
+requests are rejected with 400. Signing is offline, so authorization success
+does not prove storage is reachable. The API neither receives the file upload
+nor persists upload IDs, attaches documents to sessions, validates PDF content,
+promotes objects, or starts processing. A successful storage PUT is an upload
+to staging; it does not make a document ready for questions.
 
 ## Health endpoint
 
@@ -93,7 +146,7 @@ curl -i http://localhost:3000/health
 ```
 
 This endpoint confirms the API process can respond. It does not check external
-services. PDF upload, session handling, and frontend integration are still pending.
+services or signing credentials. Browser upload and session handling are still pending.
 
 `src/app.ts` defines the Express application and routes. `src/server.ts` starts
 the HTTP listener. See the [Express documentation](https://expressjs.com/en/starter/installing/)

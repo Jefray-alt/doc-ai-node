@@ -1,7 +1,9 @@
-import { app } from './app.ts';
+import { createApp } from './app.ts';
 import { readStorageConfig } from './storage/config.ts';
+import { createUploadSigner } from './storage/signer.ts';
 
-readStorageConfig();
+const storageConfig = readStorageConfig();
+const app = createApp(createUploadSigner(storageConfig));
 
 const port = Number(process.env.PORT ?? 3000);
 
