@@ -1,2 +1,8 @@
-.agents
+# Keep other agent files local; version this workflow.
+.agents/
+!/.agents/
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/openspec-tdd-apply/
 .worktrees/

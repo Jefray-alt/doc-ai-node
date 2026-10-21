@@ -26,3 +26,14 @@
 - Declare component types and interfaces in colocated `<ComponentName>.types.ts` files, not in component `.tsx` files. Keep shared domain types in the folder that owns them and import them where needed.
 - Keep `App.tsx` focused on composition. Extract state and interaction logic into focused hooks in the relevant component folder.
 - Keep Mantine theme configuration in `frontend/src/config/theme.ts`.
+
+
+<!-- openspec-tdd-workflow:start -->
+For OpenSpec implementation requests (including openspec-apply-change and opsx apply),
+load .agents/skills/openspec-tdd-apply/SKILL.md before editing code and use it as
+the implementation orchestrator. Delegate each task to a TDD developer and a
+separate independent reviewer. Process tasks serially; commit each reviewed task
+with only its relevant files and its checkbox. Preserve OpenSpec's readiness and
+scope checks. Do not run the stock implementation loop alongside this workflow.
+This routing applies only to implementation, not proposal, sync, or archive.
+<!-- openspec-tdd-workflow:end -->
