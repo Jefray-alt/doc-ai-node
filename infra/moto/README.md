@@ -2,8 +2,9 @@
 
 Run commands from the repository root. Requirements: Docker Engine with Compose
 v2 or newer, a POSIX shell, and curl. Python and boto3 run inside the pinned
-official Moto image; there are no application Node dependency changes. No cloud
-account, activation token, or real AWS credentials are needed.
+official Moto image; the browser integration uses the backend's Playwright
+development dependency. No cloud account, activation token, or real AWS
+credentials are needed.
 
 ## Start and inspect readiness
 
@@ -70,8 +71,8 @@ docker compose down
 unset COMPOSE_PROJECT_NAME
 ```
 
-Only one project can publish loopback port 5000 at a time. This infrastructure
-does not integrate either application with S3.
+Only one project can publish loopback port 5000 at a time. The application
+integration is described below.
 
 ## Check configuration and operations
 
@@ -115,6 +116,77 @@ would otherwise log signed query strings. Do not run the helper with shell
 tracing or add curl verbose/trace flags. The signed upload is **compatibility
 evidence only**, not proof of signature, expiry, or authorization enforcement.
 
+## Browser-to-Moto upload integration
+
+Run the host applications against this already-provisioned Moto service. The
+backend reads `backend/.env`; its values are separate from Compose configuration.
+The one-time copy below preserves an existing local configuration. For a new
+file, use the documented settings (`STORAGE_MODE=moto`, `AWS_REGION=us-east-1`,
+`S3_STAGING_BUCKET=pdf-staging`, `S3_ENDPOINT=http://localhost:5000`). Then use
+three terminals from the repository root:
+
+```sh
+if [ -e backend/.env ]; then
+  printf '%s\n' 'Keeping existing backend/.env'
+else
+  cp backend/.env.example backend/.env
+fi
+./infra/moto/up.sh
+(cd backend && npm ci && npm run dev)
+(cd frontend && npm ci && npm run dev)
+```
+
+Install the pinned Playwright browser once, then run the live integration from
+another terminal:
+
+```sh
+(cd backend && npx playwright install chromium && npm run test:integration)
+```
+
+The browser test opens the Vite workspace, selects a generated dummy PDF, and
+uses the normal UI and `/api/uploads/presign` endpoint. Its first storage PUT is
+made to fail in the browser harness; retry must request a fresh authorization
+and then complete a real cross-origin PUT to Moto. A separate fresh workspace
+cancels a delayed PUT and must remain cancelled after the delayed response.
+Using the local AWS SDK client, the test reads back only the UUID key issued by
+that run and compares the stored bytes to the selected browser `File`; it checks
+that the same key is absent from `pdf-ready`. The cancellation fixture is also
+checked absent from both buckets. The test removes only UUID keys it observed
+being issued, in `finally`; it does not reset buckets or delete other objects.
+
+### Recorded result
+
+Verified with Node `v24.22.0`, `@aws-sdk/client-s3` and
+`@aws-sdk/s3-request-presigner` `3.1154.0`, Playwright `1.64.1`, Moto `5.2.4`,
+and the repository's browser origin `http://localhost:5173`:
+
+- `./infra/moto/check.sh` passed configuration checks, configured and unrelated
+  origin CORS checks, staging and ready CORS checks, and the host signed-PUT
+  compatibility check; its fixtures were removed.
+- `npm run test:integration` passed in a real headless Chromium browser. The
+  browser upload received Moto's CORS-enabled response, the failed attempt was
+  followed by a new authorization/key and successful retry, and the uploaded
+  bytes match the browser-selected bytes when read back from `pdf-staging`. The
+  uploaded key was absent from `pdf-ready`; cancellation stayed visible after the delayed response and
+  left no object in either bucket.
+- The pinned AWS SDK signed a browser-compatible PUT without binding an
+  empty-body checksum: the generated URL had no checksum query parameter or
+  checksum requirement in signed headers, and Moto accepted the nonempty browser
+  file. This verifies compatibility with this installed SDK/Moto combination;
+  it does not test AWS signature or permission enforcement.
+
+Neither command prints signed URLs. Do not enable shell tracing, browser request
+logging, or HTTP verbose output when repeating the flow. The first failed PUT
+and cancellation are controlled browser-side scenarios; Moto is used for the
+successful transfer and object readback. The existing storage checks separately
+exercise Moto's direct configured/unconfigured-origin preflight responses.
+
+The successful upload only puts unvalidated bytes in staging. Validation,
+server-side session attachment, ready-bucket promotion, one-hour staging
+cleanup, and AWS permission/signature enforcement remain deferred. Cancellation
+cannot guarantee deletion if storage accepted a request before the browser
+aborted it.
+
 ## Verification and retention limits
 
 Moto's [bucket policy evaluation](https://docs.getmoto.org/en/latest/docs/services/s3.html)
@@ -133,9 +205,8 @@ properties.
 All data is disposable across process restarts. The agreed **one-hour staging
 retention target remains unenforced**: no expiration rule, scheduler, or cleanup
 worker runs. A restart is not retention enforcement. Notifications, PDF
-validation, automatic promotion, upload APIs, database/jobs, and application
-integration remain separate work. Smoke fixtures are dummy bytes, not a PDF
-validation test.
+validation, automatic promotion, database/jobs, and AWS deployment remain
+separate work. Smoke fixtures are dummy bytes, not a PDF validation test.
 
 ## AWS policy definitions
 

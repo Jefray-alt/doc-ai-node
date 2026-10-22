@@ -18,7 +18,7 @@ Apply serially through the project's TDD developer/independent reviewer workflow
 
 ## 4. End-to-end integration
 
-- [ ] 4.1 After 3.2, exercise the real browser-to-API-to-Moto flow and record reproducible integration instructions/results: confirm CORS, uploaded byte equality in staging, no ready-bucket promotion, failure/retry and cancellation behavior, and the installed SDK's checksum/signing compatibility without exposing signed URLs. Run the existing Moto checks and both applications' tests/typecheck/lint/build. Update `docs/roadmap.md` to describe staging upload with Feature 2 still in progress; retain explicit deferred validation/session attachment/cleanup/AWS enforcement work. Remove only integration fixtures created by these checks and document the integration outcome in the setup guide.
+- [x] 4.1 After 3.2, exercise the real browser-to-API-to-Moto flow and record reproducible integration instructions/results: confirm CORS, uploaded byte equality in staging, no ready-bucket promotion, failure/retry and cancellation behavior, and the installed SDK's checksum/signing compatibility without exposing signed URLs. Run the existing Moto checks and both applications' tests/typecheck/lint/build. Update `docs/roadmap.md` to describe staging upload with Feature 2 still in progress; retain explicit deferred validation/session attachment/cleanup/AWS enforcement work. Remove only integration fixtures created by these checks and document the integration outcome in the setup guide.
 
 ## Workflow follow-up
 

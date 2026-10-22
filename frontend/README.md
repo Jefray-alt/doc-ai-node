@@ -88,6 +88,16 @@ An uploaded file is **not ready for questions**. This controller does not valida
 PDF bytes, promote objects, start processing or persist server sessions. Existing
 chat composition remains available without generating answers.
 
+## Verified browser-to-Moto flow
+
+The host-run setup and recorded result for a real headless Chromium upload are in
+the [Moto setup guide](../infra/moto/README.md#browser-to-moto-upload-integration).
+With Moto, Express, and Vite running, execute `cd backend && npm run test:integration`.
+The browser test covers CORS-enabled transfer, a controlled storage failure and
+fresh-authorization retry, cancellation, and confirms uploaded bytes match the
+selected file in staging, with no ready-bucket object. It uses the installed AWS
+SDK signing path; it does not establish AWS permission or signature enforcement.
+
 Run the Vitest transport, controller and rendered workspace tests, plus frontend
 checks, from this folder:
 
