@@ -18,7 +18,7 @@ export function createUploadRouter(
 
     if (!validateUploadMetadata(req.body)) {
       throw new HttpError(400, 'INVALID_UPLOAD_METADATA',
-        'Provide a .pdf filename, an integer size from 1 to 10485760 bytes, and contentType application/pdf or empty. No other fields are allowed.');
+        'Provide a valid PDF upload request.');
     }
 
     let authorization;

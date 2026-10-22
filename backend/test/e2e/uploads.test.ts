@@ -4,12 +4,12 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-import { createApp } from '../src/app.ts';
-import { logger } from '../src/logger.ts';
-import { createUploadRouter } from '../src/uploads/route.ts';
-import { createUploadSigner } from '../src/storage/signer.ts';
-import type { UploadAuthorization } from '../src/storage/storage.types.ts';
-import { validateUploadMetadata } from '../src/uploads/validation.ts';
+import { createApp } from '../../src/app.ts';
+import { logger } from '../../src/logger.ts';
+import { createUploadRouter } from '../../src/uploads/route.ts';
+import { createUploadSigner } from '../../src/storage/signer.ts';
+import type { UploadAuthorization } from '../../src/storage/storage.types.ts';
+import { validateUploadMetadata } from '../../src/uploads/validation.ts';
 
 const candidate = {
   filename: 'document.pdf',
@@ -312,7 +312,7 @@ test('real offline signer creates distinct opaque staging authorizations over HT
 });
 
 test('the documented request example works against the HTTP endpoint', async () => {
-  const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');
+  const readme = await readFile(new URL('../../README.md', import.meta.url), 'utf8');
   const section = readme.split('## Upload authorization endpoint')[1];
   const example = section?.match(/```json\n([\s\S]*?)\n```/)?.[1];
 

@@ -1,42 +1,17 @@
+import { z } from 'zod';
+
 import type { UploadMetadata } from './uploads.types.ts';
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
+export const uploadMetadataSchema = z.object({
+  filename: z.string().regex(/\.pdf$/i),
+  size: z.number().int().min(1).max(MAX_UPLOAD_BYTES),
+  contentType: z.union([z.literal('application/pdf'), z.literal('')])
+    .transform((): 'application/pdf' => 'application/pdf'),
+}).strict();
+
 export function validateUploadMetadata(value: unknown): UploadMetadata | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return undefined;
-  }
-
-  const metadata = value as Record<string, unknown>;
-  const allowedFields = ['filename', 'size', 'contentType'];
-
-  // Accept metadata only; in particular, callers cannot select a storage target.
-  if (Object.keys(metadata).some((field) => !allowedFields.includes(field))) {
-    return undefined;
-  }
-
-  const { filename, size, contentType } = metadata;
-
-  if (typeof filename !== 'string' || !/\.pdf$/i.test(filename)) {
-    return undefined;
-  }
-
-  if (
-    typeof size !== 'number'
-    || !Number.isInteger(size)
-    || size <= 0
-    || size > MAX_UPLOAD_BYTES
-  ) {
-    return undefined;
-  }
-
-  if (contentType !== 'application/pdf' && contentType !== '') {
-    return undefined;
-  }
-
-  return {
-    filename,
-    size,
-    contentType: 'application/pdf',
-  };
+  const result = uploadMetadataSchema.safeParse(value);
+  return result.success ? result.data : undefined;
 }

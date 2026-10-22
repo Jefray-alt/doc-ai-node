@@ -15,10 +15,10 @@ export const handleError: ErrorRequestHandler = (error: unknown, _req, res, next
     httpError = error;
   } else if (typeof error === 'object' && error !== null
     && 'type' in error && error.type === 'entity.too.large') {
-    httpError = new HttpError(413, 'JSON_TOO_LARGE', 'Upload metadata JSON must not exceed 4096 bytes.');
+    httpError = new HttpError(413, 'JSON_TOO_LARGE', 'Request body exceeds the allowed size.');
   } else if (typeof error === 'object' && error !== null
     && 'type' in error && error.type === 'entity.parse.failed') {
-    httpError = new HttpError(400, 'INVALID_JSON', 'Send valid upload metadata JSON.');
+    httpError = new HttpError(400, 'INVALID_JSON', 'Send valid JSON.');
   } else {
     httpError = new HttpError(500, 'INTERNAL_ERROR', 'An unexpected error occurred.', { cause: error });
   }

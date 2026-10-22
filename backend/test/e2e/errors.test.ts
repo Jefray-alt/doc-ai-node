@@ -3,9 +3,9 @@ import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { expect, test, vi } from 'vitest';
 
-import { createApp } from '../src/app.ts';
-import { HttpError } from '../src/errors/http-error.ts';
-import { errorDiagnostics, logger } from '../src/logger.ts';
+import { createApp } from '../../src/app.ts';
+import { HttpError } from '../../src/errors/http-error.ts';
+import { errorDiagnostics, logger } from '../../src/logger.ts';
 
 test.each([
   [new HttpError(409, 'CONFLICT', 'Keep this message.'), 409,
