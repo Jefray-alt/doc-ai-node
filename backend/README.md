@@ -77,8 +77,11 @@ Keep this signer within the existing upload-signer permission boundary. AWS
 provisioning, role assignment, bucket CORS, and actual permission/signature
 allow/deny checks remain deployment work. The separate backend-access policy
 does not need staging writes. Signing success alone does not prove storage is
-reachable or a bucket exists. Never log signing exceptions, credentials, or
-signed URLs. The direct browser transfer is a subsequent slice.
+reachable or a bucket exists. Never log raw signing exceptions, credentials, or
+signed URLs. Signing failures are logged with Pino using an allowlisted error
+category and numeric SDK status/retry details; raw messages and stacks are omitted.
+`npm run dev` enables readable `pino-pretty` output; other environments use JSON.
+Set `LOG_LEVEL` to adjust verbosity. The direct browser transfer is a subsequent slice.
 
 ## Upload authorization endpoint
 

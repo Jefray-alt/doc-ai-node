@@ -1,12 +1,9 @@
 import { createApp } from './app.ts';
-import { readStorageConfig } from './storage/config.ts';
-import { createUploadSigner } from './storage/signer.ts';
+import { logger } from './logger.ts';
 
-const storageConfig = readStorageConfig();
-const app = createApp(createUploadSigner(storageConfig));
-
+const app = createApp();
 const port = Number(process.env.PORT ?? 3000);
 
 app.listen(port, () => {
-  console.log(`API listening on http://localhost:${port}`);
+  logger.info({ port }, 'API listening');
 });

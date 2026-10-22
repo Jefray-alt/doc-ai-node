@@ -1,66 +1,36 @@
 import express from 'express';
-import type { ErrorRequestHandler } from 'express';
 
+import { HttpError } from '../errors/http-error.ts';
+import { readStorageConfig } from '../storage/config.ts';
+import { createUploadSigner } from '../storage/signer.ts';
 import type { UploadSigner } from '../storage/storage.types.ts';
 import { validateUploadMetadata } from './validation.ts';
 
-export function createUploadRouter(signUpload: UploadSigner) {
+export function createUploadRouter(
+  signUpload: UploadSigner = createUploadSigner(readStorageConfig()),
+) {
   const router = express.Router();
 
   router.post('/', express.json({ limit: '4kb' }), async (req, res) => {
     if (!req.is('application/json')) {
-      res.status(400).json({
-        error: {
-          code: 'INVALID_JSON',
-          message: 'Send upload metadata as application/json.',
-        },
-      });
-
-      return;
+      throw new HttpError(400, 'INVALID_JSON', 'Send upload metadata as application/json.');
     }
 
     if (!validateUploadMetadata(req.body)) {
-      res.status(400).json({
-        error: {
-          code: 'INVALID_UPLOAD_METADATA',
-          message: 'Provide a .pdf filename, an integer size from 1 to 10485760 bytes, and contentType application/pdf or empty. No other fields are allowed.',
-        },
-      });
-
-      return;
+      throw new HttpError(400, 'INVALID_UPLOAD_METADATA',
+        'Provide a .pdf filename, an integer size from 1 to 10485760 bytes, and contentType application/pdf or empty. No other fields are allowed.');
     }
 
+    let authorization;
     try {
-      const authorization = await signUpload();
-
-      res.status(201).json(authorization);
-    } catch {
-      res.status(503).json({
-        error: {
-          code: 'SIGNING_UNAVAILABLE',
-          message: 'Upload authorization is unavailable. Please try again.',
-        },
-      });
+      authorization = await signUpload();
+    } catch (cause) {
+      throw new HttpError(503, 'SIGNING_UNAVAILABLE',
+        'Upload authorization is unavailable. Please try again.', { cause });
     }
+
+    res.status(201).json(authorization);
   });
-
-  const handleJsonError: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
-    const oversized = typeof error === 'object'
-      && error !== null
-      && 'type' in error
-      && error.type === 'entity.too.large';
-
-    res.status(oversized ? 413 : 400).json({
-      error: {
-        code: oversized ? 'JSON_TOO_LARGE' : 'INVALID_JSON',
-        message: oversized
-          ? 'Upload metadata JSON must not exceed 4096 bytes.'
-          : 'Send valid upload metadata JSON.',
-      },
-    });
-  };
-
-  router.use(handleJsonError);
 
   return router;
 }

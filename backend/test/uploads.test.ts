@@ -5,6 +5,8 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { createApp } from '../src/app.ts';
+import { logger } from '../src/logger.ts';
+import { createUploadRouter } from '../src/uploads/route.ts';
 import { createUploadSigner } from '../src/storage/signer.ts';
 import type { UploadAuthorization } from '../src/storage/storage.types.ts';
 import { validateUploadMetadata } from '../src/uploads/validation.ts';
@@ -72,7 +74,7 @@ beforeEach(async () => {
   signUpload.mockReset();
   signUpload.mockResolvedValue(authorization);
 
-  await listen(createApp(signUpload));
+  await listen(createApp(createUploadRouter(signUpload)));
 });
 
 afterEach(async () => {
@@ -222,6 +224,7 @@ test.each(['text/plain', 'application/pdf', 'multipart/form-data'])(
 );
 
 test('signing failures return a safe 503 without logging credentials or URLs', async () => {
+  const errorLog = vi.spyOn(logger, 'error').mockImplementation(() => {});
   const logs = ['log', 'error', 'warn', 'info', 'debug'].map((method) => (
     vi.spyOn(console, method as 'log').mockImplementation(() => {})
   ));
@@ -241,6 +244,11 @@ test('signing failures return a safe 503 without logging credentials or URLs', a
   });
 
   expect(signUpload).toHaveBeenCalledExactlyOnceWith();
+
+  expect(errorLog).toHaveBeenCalledExactlyOnceWith({
+    code: 'SIGNING_UNAVAILABLE', error: { name: 'Error' },
+  }, 'Request failed');
+  expect(JSON.stringify(errorLog.mock.calls)).not.toMatch(/secret-value|secret-signature|storage.invalid/);
 
   for (const log of logs) {
     expect(log).not.toHaveBeenCalled();
@@ -274,14 +282,14 @@ test('real offline signer creates distinct opaque staging authorizations over HT
 
   await new Promise<void>((resolve) => server.close(() => resolve()));
 
-  await listen(createApp(createUploadSigner({
+  await listen(createApp(createUploadRouter(createUploadSigner({
     mode: 'moto',
     region: 'us-east-1',
     stagingBucket: 'pdf-staging',
     endpoint: 'http://localhost:5000',
   }, {
     now: () => new Date('2026-10-21T12:00:00.000Z'),
-  })));
+  }))));
 
   const firstResponse = await postJson(candidate);
   const secondResponse = await postJson(candidate);
