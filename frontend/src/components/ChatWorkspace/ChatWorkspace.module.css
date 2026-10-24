@@ -23,6 +23,15 @@
   border-bottom: 1px solid var(--mantine-color-gray-3);
 }
 
+.document {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.filename {
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 36em) {
   .chat {
     padding: 16px;

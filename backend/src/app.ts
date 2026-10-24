@@ -1,7 +1,17 @@
 import express from 'express';
 
-export const app = express();
+import { createApiRouter } from './api.ts';
+import { handleError } from './errors/middleware.ts';
 
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok' });
-});
+export function createApp() {
+  const app = express();
+
+  app.get('/health', (_req, res) => {
+    res.json({ status: 'ok' });
+  });
+
+  app.use('/api', createApiRouter());
+  app.use(handleError);
+
+  return app;
+}

@@ -9,7 +9,7 @@ export function MessageComposer({ onSend }: MessageComposerProps) {
   return (
     <form onSubmit={sendMessage} className={classes.composer} aria-label="Message composer">
       <Text size="sm" c="gray.7" mb="md" id="workspace-availability">
-        PDF upload and answers are not available yet.
+        You can write messages here. PDF answers are not available yet.
       </Text>
       <Textarea
         ref={inputRef}
