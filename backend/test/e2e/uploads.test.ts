@@ -6,7 +6,6 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import express from 'express';
 
-import { createApiRouter } from '../../src/api.ts';
 import { handleError } from '../../src/errors/middleware.ts';
 import { logger } from '../../src/logger.ts';
 import { createUploadRouter } from '../../src/uploads/route.ts';
@@ -39,7 +38,7 @@ const signUpload = vi.fn<() => Promise<UploadAuthorization>>();
 function createTestApp(router: ReturnType<typeof createUploadRouter>) {
   const app = express();
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
-  app.use('/api', createApiRouter(router));
+  app.use('/api/uploads/presign', router);
   app.use(handleError);
   return app;
 }

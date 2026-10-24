@@ -6,13 +6,12 @@ import express from 'express';
 
 import { createApp } from '../../src/app.ts';
 import { handleError } from '../../src/errors/middleware.ts';
-import { createApiRouter } from '../../src/api.ts';
 import { HttpError } from '../../src/errors/http-error.ts';
 import { errorDiagnostics, logger } from '../../src/logger.ts';
 
 function createTestApp(apiRouter: express.Router) {
   const app = express();
-  app.use('/api', createApiRouter(apiRouter));
+  app.use('/api/uploads/presign', apiRouter);
   app.use(handleError);
   return app;
 }
