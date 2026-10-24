@@ -1,4 +1,4 @@
-import { StorageXMLHttpRequest } from './support/browserTransport'
+import { StorageXMLHttpRequest } from '../../../tests/support/browserTransport'
 
 import { readFileSync } from 'node:fs'
 import { parseEnv } from 'node:util'
@@ -6,15 +6,15 @@ import { AxiosError, AxiosHeaders, CanceledError } from 'axios'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveConfig } from 'vite'
 
-import { apiHttp, storageHttp } from '../src/api/http'
+import { apiHttp, storageHttp } from '../../api/http'
 import {
   requestUploadAuthorization,
   uploadFileToStorage,
   UploadTransportError,
-} from '../src/components/PdfUpload/uploadTransport'
+} from './uploadTransport'
 
 import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios'
-import type { UploadAuthorization } from '../src/components/PdfUpload/PdfUpload.types'
+import type { UploadAuthorization } from './PdfUpload.types'
 
 const authorization: UploadAuthorization = {
   uploadId: 'opaque-upload-id',
@@ -106,7 +106,7 @@ describe('development API routing', () => {
     vi.stubEnv('VITE_API_BASE_URL', '')
     vi.resetModules()
 
-    const defaultHttp = await import('../src/api/http')
+    const defaultHttp = await import('../../api/http')
 
     expect(defaultHttp.apiHttp.getUri({ url: '/uploads/presign' }))
       .toBe('/api/uploads/presign')
@@ -114,7 +114,7 @@ describe('development API routing', () => {
     vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.test/api')
     vi.resetModules()
 
-    const customHttp = await import('../src/api/http')
+    const customHttp = await import('../../api/http')
 
     expect(customHttp.apiHttp.getUri({ url: '/uploads/presign' }))
       .toBe('https://api.example.test/api/uploads/presign')

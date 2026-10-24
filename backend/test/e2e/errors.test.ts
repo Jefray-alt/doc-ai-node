@@ -1,11 +1,21 @@
-import express from 'express';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { expect, test, vi } from 'vitest';
 
+import express from 'express';
+
 import { createApp } from '../../src/app.ts';
+import { handleError } from '../../src/errors/middleware.ts';
+import { createApiRouter } from '../../src/api.ts';
 import { HttpError } from '../../src/errors/http-error.ts';
 import { errorDiagnostics, logger } from '../../src/logger.ts';
+
+function createTestApp(apiRouter: express.Router) {
+  const app = express();
+  app.use('/api', createApiRouter(apiRouter));
+  app.use(handleError);
+  return app;
+}
 
 test.each([
   [new HttpError(409, 'CONFLICT', 'Keep this message.'), 409,
@@ -16,7 +26,7 @@ test.each([
   const router = express.Router();
   router.post('/', () => { throw error; });
   const log = vi.spyOn(logger, 'error').mockImplementation(() => {});
-  const server = createApp(router).listen(0, '127.0.0.1');
+  const server = createTestApp(router).listen(0, '127.0.0.1');
   try {
     await once(server, 'listening');
     const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/uploads/presign`, { method: 'POST' });

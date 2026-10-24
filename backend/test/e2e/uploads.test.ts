@@ -4,7 +4,10 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-import { createApp } from '../../src/app.ts';
+import express from 'express';
+
+import { createApiRouter } from '../../src/api.ts';
+import { handleError } from '../../src/errors/middleware.ts';
 import { logger } from '../../src/logger.ts';
 import { createUploadRouter } from '../../src/uploads/route.ts';
 import { createUploadSigner } from '../../src/storage/signer.ts';
@@ -33,7 +36,15 @@ let baseUrl: string;
 
 const signUpload = vi.fn<() => Promise<UploadAuthorization>>();
 
-async function listen(app: ReturnType<typeof createApp>) {
+function createTestApp(router: ReturnType<typeof createUploadRouter>) {
+  const app = express();
+  app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+  app.use('/api', createApiRouter(router));
+  app.use(handleError);
+  return app;
+}
+
+async function listen(app: ReturnType<typeof createTestApp>) {
   server = app.listen(0, '127.0.0.1');
 
   await once(server, 'listening');
@@ -74,7 +85,7 @@ beforeEach(async () => {
   signUpload.mockReset();
   signUpload.mockResolvedValue(authorization);
 
-  await listen(createApp(createUploadRouter(signUpload)));
+  await listen(createTestApp(createUploadRouter(signUpload)));
 });
 
 afterEach(async () => {
@@ -282,7 +293,7 @@ test('real offline signer creates distinct opaque staging authorizations over HT
 
   await new Promise<void>((resolve) => server.close(() => resolve()));
 
-  await listen(createApp(createUploadRouter(createUploadSigner({
+  await listen(createTestApp(createUploadRouter(createUploadSigner({
     mode: 'moto',
     region: 'us-east-1',
     stagingBucket: 'pdf-staging',
