@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development node --watch --env-file-if-exists=.env src/server.ts",
-    "build": "tsc",
+    "build": "npm run clean && tsc",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
     "test": "vitest run",
-    "test:integration": "node test/browserMoto.integration.mjs"
+    "test:integration": "node test/browserMoto.integration.mjs",
+    "clean": "node scripts/clean-dist.mjs"
   },
   "engines": {
     "node": ">=24.0.0"
