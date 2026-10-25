@@ -4,22 +4,38 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node --watch --env-file-if-exists=.env src/server.ts",
-    "build": "tsc",
-    "start": "node --env-file-if-exists=.env dist/server.js",
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint"
+    "lint": "oxlint",
+    "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.config.e2e.ts"
   },
   "engines": {
     "node": ">=24.0.0"
   },
   "dependencies": {
-    "express": "^5.3.0"
+    "@nestjs/common": "^11.2.8",
+    "@nestjs/core": "^11.2.8",
+    "@nestjs/platform-express": "^11.2.8",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
+    "@nestjs/cli": "^11.0.24",
+    "@nestjs/testing": "^11.2.8",
+    "@swc/core": "^1.16.20",
     "@types/node": "^24.19.2",
+    "@types/supertest": "^7.2.1",
     "oxlint": "^1.88.0",
-    "typescript": "^7.0.2"
+    "supertest": "^7.3.1",
+    "typescript": "^5.9.3",
+    "unplugin-swc": "^2.0.0",
+    "vitest": "^4.1.12"
+  },
+  "overrides": {
+    "multer": "^2.5.0",
+    "body-parser": "^2.4.0"
   }
 }

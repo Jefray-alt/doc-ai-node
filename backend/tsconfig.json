@@ -3,15 +3,13 @@
     "target": "ES2023",
     "lib": ["ES2023"],
     "module": "NodeNext",
-    "rootDir": "src",
-    "outDir": "dist",
     "types": ["node"],
     "strict": true,
-    "erasableSyntaxOnly": true,
-    "rewriteRelativeImportExtensions": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "noEmitOnError": true
   },
-  "include": ["src"]
+  "include": ["src", "test", "vitest.config.ts", "vitest.config.e2e.ts"]
 }
