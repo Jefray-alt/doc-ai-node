@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-bucket=doc-ai-local-pdfs
+bucket=${S3_BUCKET_NAME:?Set S3_BUCKET_NAME in .env}
 
 bucket_count=$(aws \
   s3api list-buckets \

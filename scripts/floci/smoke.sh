@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-bucket=doc-ai-local-pdfs
+bucket=$(docker compose exec -T floci sh -c \
+  'printf "%s" "${S3_BUCKET_NAME:?Set S3_BUCKET_NAME in .env}"')
 key="smoke/$(date +%s)-$$.txt"
 payload="floci-smoke-$(date +%s)-$$"
 uploaded=0
