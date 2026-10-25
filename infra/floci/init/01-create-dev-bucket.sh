@@ -1,18 +1,16 @@
 #!/bin/sh
 set -eu
 
-endpoint=http://localhost:4566
 bucket=doc-ai-local-pdfs
 
-bucket_count=$(aws --endpoint-url "$endpoint" --region us-east-1 \
+bucket_count=$(aws \
   s3api list-buckets \
   --query "Buckets[?Name=='$bucket'] | length(@)" \
   --output text)
 
 case "$bucket_count" in
   0)
-    aws --endpoint-url "$endpoint" --region us-east-1 \
-      s3api create-bucket --bucket "$bucket"
+    aws s3api create-bucket --bucket "$bucket"
     ;;
   1)
     ;;

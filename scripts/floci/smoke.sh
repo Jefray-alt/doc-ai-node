@@ -2,17 +2,12 @@
 set -eu
 
 bucket=doc-ai-local-pdfs
-endpoint=http://localhost:4566
 key="smoke/$(date +%s)-$$.txt"
 payload="floci-smoke-$(date +%s)-$$"
 uploaded=0
 
 aws() {
-  docker compose exec -T \
-    -e AWS_ACCESS_KEY_ID=test \
-    -e AWS_SECRET_ACCESS_KEY=test \
-    -e AWS_DEFAULT_REGION=us-east-1 \
-    floci aws --endpoint-url "$endpoint" "$@"
+  docker compose exec -T floci aws "$@"
 }
 
 cleanup() {
