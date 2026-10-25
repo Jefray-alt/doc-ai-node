@@ -12,7 +12,7 @@ This is a lightweight, outcome-oriented roadmap for a solo learning project. It 
 
 **Backend progress:** The REST API foundation for backlog feature 2 is initialized in `backend/` with Express, TypeScript, and `GET /health`. Each application owns its Node configuration, package manifest, dependencies, and lockfile. PDF upload, session handling, and frontend/backend integration remain pending.
 
-**Validation:** Type checking, linting, and the production build pass. Browser checks cover message submission, multiline and IME input, blank-message rejection, scrolling, PDF availability dialog and focus, refresh reset, and mobile layouts at 320px and 390px.
+**Validation:** Colocated frontend unit tests isolate each component and hook, mocking nested app components. Coverage includes chat message rendering, workspace state and wiring, composer submission and keyboard/IME guards, conversation rendering and scrolling, and PDF dialog behavior. Run them with `npm test` from `frontend/`, or use `npm run test:watch` during development. Type checking and linting pass. Existing browser checks cover message submission, multiline and IME input, blank-message rejection, scrolling, PDF availability dialog and focus, refresh reset, and mobile layouts at 320px and 390px.
 
 ## Next
 
