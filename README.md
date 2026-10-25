@@ -9,7 +9,7 @@ This monorepo keeps Node configuration, package manifests, lockfiles, and
 dependencies inside each application, in `frontend/` and `backend/`.
 
 - `frontend/`: React + TypeScript SPA using Vite and Mantine.
-- `backend/`: Express + TypeScript REST API with a health endpoint.
+- `backend/`: NestJS + TypeScript REST API using Nest's default Express adapter.
 - `docs/`: product brief, feature backlog, and roadmap.
 
 ## Development
@@ -64,6 +64,9 @@ to `backend/.env` to change the port.
 
 Run `npm run typecheck`, `npm run lint`, and `npm run build` from `backend/`.
 Then use `npm start` to run the compiled API. See [backend/README.md](backend/README.md).
+Run `npm test` for all TypeScript suites or `npm run test:e2e` for HTTP and
+process-level coverage. Backend modules, naming, and testing conventions are
+documented in [backend/README.md](backend/README.md).
 
 PDF upload, generated answers, and frontend/backend integration remain to be
 implemented.
