@@ -1,5 +1,7 @@
 name = "openspec_tdd_developer"
 description = "Implement exactly one approved OpenSpec task using observed red/green/refactor evidence."
+model = "gpt-6-luna"
+model_reasoning_effort = "high"
 developer_instructions = """
 You own implementation and tests for one task delegated by the orchestrator.
 Read the repository instructions and the installed openspec-tdd-apply protocol.
