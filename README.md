@@ -71,6 +71,39 @@ documented in [backend/README.md](backend/README.md).
 PDF upload, generated answers, and frontend/backend integration remain to be
 implemented.
 
+### Local S3 storage
+
+Feature 2's local storage prerequisite uses Floci, an S3-compatible service in
+Docker. Start it from the repository root with Docker Engine and Docker Compose
+v2:
+
+```sh
+docker compose up -d --wait
+sh scripts/floci/smoke.sh
+```
+
+Compose waits until the `doc-ai-local-pdfs` bucket responds to an S3 readiness
+check. The smoke check uploads a temporary object, compares its downloaded
+bytes, and confirms deletion. It needs no AWS account or host AWS CLI.
+
+For local application configuration, use endpoint `http://localhost:4566`,
+region `us-east-1`, access key `test`, secret key `test`, and bucket
+`doc-ai-local-pdfs`. These are local emulator values, not real AWS credentials.
+Floci binds only to loopback. To inspect startup or initialization errors, run
+`docker compose logs floci`.
+
+Use `docker compose restart floci` to restart the service. `docker compose down`
+stops and removes its container while keeping stored objects in the Compose
+volume. To deliberately clear local data and recreate an empty bucket, run:
+
+```sh
+docker compose down -v
+docker compose up -d --wait
+```
+
+The reset removes this Compose project's volume and all objects in it. If port
+4566 is occupied, stop the service using it before starting Floci.
+
 ## OpenSpec TDD workflow
 
 This project includes [openspec-codex-tdd v0.2.0](https://github.com/Jefray-alt/openspec-codex-tdd/tree/v0.2.0),
