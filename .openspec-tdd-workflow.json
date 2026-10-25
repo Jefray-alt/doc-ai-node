@@ -1,0 +1,13 @@
+{
+  "agents_block": "<!-- openspec-tdd-workflow:start -->\nFor OpenSpec implementation requests (including openspec-apply-change and opsx apply),\nload .agents/skills/openspec-tdd-apply/SKILL.md before editing code and use it as\nthe implementation orchestrator. Delegate each task to a TDD developer and a\nseparate independent reviewer. Process tasks serially; commit each reviewed task\nwith only its relevant files and its checkbox. Preserve OpenSpec's readiness and\nscope checks. Do not run the stock implementation loop alongside this workflow.\nThis routing applies only to implementation, not proposal, sync, or archive.\n<!-- openspec-tdd-workflow:end -->",
+  "agents_existed": true,
+  "files": {
+    ".agents/skills/openspec-tdd-apply/SKILL.md": "f1f98e7220db25f6b6e168faba9ea06b0d4062fa33a5eb3c00074618be3e0295",
+    ".agents/skills/openspec-tdd-apply/references/protocol.md": "9af7267bc6d8c84b81a0a405f4b8567c868b759f2c2d0b6ceba5f71cae56e0dd",
+    ".codex/agents/openspec_tdd_developer.toml": "9c14aa0b911a89d5a221693d71195a2259ff6c4f5db64e70368d74e87ea8d955",
+    ".codex/agents/openspec_tdd_reviewer.toml": "088494f63615a99c8a18c50df0ad2b7d80c2cc88c96aeb62fb7c62f5f655e26d"
+  },
+  "format": 1,
+  "source_revision": "b2a765879db2470afe45ba1e75c80c695a339231",
+  "version": "0.2.0"
+}

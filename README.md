@@ -67,3 +67,27 @@ Then use `npm start` to run the compiled API. See [backend/README.md](backend/RE
 
 PDF upload, generated answers, and frontend/backend integration remain to be
 implemented.
+
+## OpenSpec TDD workflow
+
+This project includes [openspec-codex-tdd v0.2.0](https://github.com/Jefray-alt/openspec-codex-tdd/tree/v0.2.0),
+with a project skill and separate Codex developer/reviewer agents. Install the
+OpenSpec CLI on another machine with:
+
+```sh
+npm install --global @fission-ai/openspec@1.15.0
+```
+
+Follow the planning rules in `AGENTS.md` and the existing product brief, backlog,
+and roadmap. In Codex, use `$openspec-propose` to prepare the current feature.
+After its plan is approved and committed, invoke:
+
+```text
+$openspec-tdd-apply <change-name>
+```
+
+The workflow requires a clean working tree and committed setup/planning files.
+It implements tasks serially using red/green/refactor, independent review, and
+one commit per reviewed task. It does not push or archive automatically. The new
+skills are available on the next turn; reload Codex if the custom agents are
+missing.

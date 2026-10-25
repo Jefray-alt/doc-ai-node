@@ -1,2 +1,11 @@
-.agents
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/openspec-apply-change/
+!.agents/skills/openspec-archive-change/
+!.agents/skills/openspec-explore/
+!.agents/skills/openspec-propose/
+!.agents/skills/openspec-sync-specs/
+!.agents/skills/openspec-update-change/
+!.agents/skills/openspec-tdd-apply/
 .worktrees/

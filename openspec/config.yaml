@@ -1,0 +1,9 @@
+schema: spec-driven
+rules:
+  tasks:
+    - Each checkbox delivers one independently reviewable behavior with its tests in one commit.
+    - Include acceptance criteria and relevant verification commands for each task.
+operations:
+  apply:
+    guidance:
+      - Use openspec-tdd-apply for serial TDD implementation and independent review of each task.
