@@ -1,5 +1,132 @@
+.header {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--mantine-color-gray-3);
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.body {
+  padding: 0;
+}
+
+.content {
+  padding: 20px 24px 24px;
+}
+
+.filePicker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 24px;
+  border: 1px dashed var(--mantine-color-gray-5);
+  border-radius: 6px;
+  background: var(--mantine-color-gray-0);
+  text-align: center;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.filePicker:hover:not([data-disabled]) {
+  border-color: var(--mantine-color-dark-4);
+  background: var(--mantine-color-gray-1);
+}
+
+.filePicker:focus-within {
+  outline: 2px solid var(--mantine-color-dark-4);
+  outline-offset: 3px;
+}
+
+.filePicker[data-selected] {
+  flex-direction: row;
+  gap: 12px;
+  padding: 16px;
+  border-style: solid;
+  text-align: left;
+}
+
+.filePicker[data-error] {
+  border-color: var(--mantine-color-red-7);
+}
+
+.filePicker[data-disabled] {
+  opacity: 0.65;
+}
+
 .fileInput {
-  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   width: 100%;
-  font: inherit;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.fileInput:disabled {
+  cursor: wait;
+}
+
+.documentIcon {
+  flex-shrink: 0;
+  color: var(--mantine-color-gray-7);
+}
+
+.fileDetails {
+  min-width: 0;
+}
+
+.fileName {
+  overflow-wrap: anywhere;
+}
+
+.browse {
+  flex-shrink: 0;
+  color: var(--mantine-color-dark-6);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.filePicker[data-selected] .browse {
+  margin-left: auto;
+}
+
+.footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--mantine-color-gray-3);
+  background: var(--mantine-color-gray-0);
+}
+
+.success {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-block: 8px;
+}
+
+.successIcon {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--mantine-color-green-8);
+}
+
+@media (max-width: 36em) {
+  .header,
+  .content,
+  .footer {
+    padding-inline: 16px;
+  }
+
+  .filePicker[data-selected] {
+    flex-wrap: wrap;
+  }
+
+  .filePicker[data-selected] .fileDetails {
+    flex: 1;
+  }
 }
