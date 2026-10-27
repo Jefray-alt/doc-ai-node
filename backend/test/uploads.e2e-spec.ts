@@ -1,8 +1,9 @@
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
 import { AppModule } from '../src/app.module.js';
+import { UploadsService } from '../src/uploads/uploads.service.js';
 
 process.env.AWS_ACCESS_KEY_ID = 'test';
 process.env.AWS_SECRET_ACCESS_KEY = 'test';
@@ -57,10 +58,18 @@ describe('PDF upload authorization', () => {
     [{ filename: 'notes.pdf', contentType: 'application/pdf', sizeBytes: 0 }],
     [{ filename: 'notes.pdf', contentType: 'application/pdf', sizeBytes: 20 * 1024 * 1024 + 1 }],
   ])('rejects invalid upload metadata: %j', async (payload) => {
+    const createPresignedUpload = vi.spyOn(
+      app.get(UploadsService),
+      'createPresignedUpload',
+    );
+    const callCount = createPresignedUpload.mock.calls.length;
+
     await request(app.getHttpServer())
       .post('/uploads/presign')
       .set('Content-Type', 'application/json')
       .send(JSON.stringify(payload))
       .expect(400);
+
+    expect(createPresignedUpload).toHaveBeenCalledTimes(callCount);
   });
 });

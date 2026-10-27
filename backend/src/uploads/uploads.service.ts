@@ -1,11 +1,10 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { S3Client } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { randomUUID } from 'node:crypto';
-import { extname } from 'node:path';
 import type { PresignUploadRequest, PresignedUploadResponse } from './uploads.dto.js';
+import { MAX_UPLOAD_BYTES } from './uploads.constants.js';
 
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const UPLOAD_EXPIRY_SECONDS = 5 * 60;
 
 @Injectable()
@@ -28,23 +27,7 @@ export class UploadsService {
     });
   }
 
-  async createPresignedUpload(
-    input: PresignUploadRequest | null | undefined,
-  ): Promise<PresignedUploadResponse> {
-    if (
-      !input ||
-      typeof input !== 'object' ||
-      typeof input.filename !== 'string' ||
-      extname(input.filename).toLowerCase() !== '.pdf' ||
-      input.contentType !== 'application/pdf' ||
-      typeof input.sizeBytes !== 'number' ||
-      !Number.isInteger(input.sizeBytes) ||
-      input.sizeBytes < 1 ||
-      input.sizeBytes > MAX_UPLOAD_BYTES
-    ) {
-      throw new BadRequestException('Upload must be a PDF between 1 byte and 20 MiB.');
-    }
-
+  async createPresignedUpload(_input: PresignUploadRequest): Promise<PresignedUploadResponse> {
     const uploadId = randomUUID();
     const key = `incoming/${uploadId}.pdf`;
     const bucket = process.env.S3_QUARANTINE_BUCKET ?? 'doc-ai-local-quarantine';

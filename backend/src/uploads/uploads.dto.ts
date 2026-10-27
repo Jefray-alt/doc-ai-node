@@ -1,7 +1,7 @@
 export type PresignUploadRequest = {
-  filename: unknown;
-  contentType: unknown;
-  sizeBytes: unknown;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
 };
 
 export type PresignedUploadResponse = {
