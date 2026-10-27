@@ -56,6 +56,11 @@ describe('PDF upload authorization', () => {
     [{ filename: 'notes.txt', contentType: 'application/pdf', sizeBytes: 1 }],
     [{ filename: 'notes.pdf', contentType: 'text/plain', sizeBytes: 1 }],
     [{ filename: 'notes.pdf', contentType: 'application/pdf', sizeBytes: 0 }],
+    [{ filename: 'notes.pdf', contentType: 'application/pdf', sizeBytes: 1.5 }],
+    [{ filename: 'notes.pdf', contentType: 'application/pdf', sizeBytes: '1' }],
+    [{ filename: 'notes.pdf', contentType: 'application/pdf' }],
+    [{ filename: 'notes.pdf', contentType: ['application/pdf'], sizeBytes: 1 }],
+    [{ filename: 12, contentType: 'application/pdf', sizeBytes: 1 }],
     [{ filename: 'notes.pdf', contentType: 'application/pdf', sizeBytes: 20 * 1024 * 1024 + 1 }],
   ])('rejects invalid upload metadata: %j', async (payload) => {
     const createPresignedUpload = vi.spyOn(
