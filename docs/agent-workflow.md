@@ -29,6 +29,30 @@ these guard checks, but must not start developer/reviewer workers before they
 pass. An existing feature branch needs no branch question. These startup gates
 do not apply to edits made during an already-started normal task.
 
+## Decompose the requested work
+
+Before editing files or starting developer/reviewer workers, the main session
+publishes an ordered task and commit plan based on the user's request and
+accepted requirements. Each task entry names its task ID, concrete outcome and
+scope, dependencies, acceptance criteria and expected checks, and proposed
+Conventional Commit. Keep the plan lightweight and focused on the requested
+work; do not add product scope or detail future tasks beyond what is needed to
+show dependencies and sequence.
+
+Substantive change requests must be divided into multiple cohesive, independently
+reviewable tasks. Use a single task only when the work is genuinely small and
+indivisible, and state the specific reason in the plan. Do not split work by
+arbitrary file or layer boundaries, or separate tests from the implementation
+they verify just to increase the task count. Include the tests and documentation
+needed to make each task coherent and verifiable.
+
+Complete each planned task, its independent review, and its commit before
+starting the next task. Keep task commits separate; do not squash them into a
+final catch-all commit unless the user explicitly requests it. If discovery
+requires a scope or dependency change, revise and publish the remaining plan
+before doing the changed work. At completion, report the ordered task-to-commit
+mapping.
+
 ## One task at a time
 
 Work serially in the same checkout. For each distinct task, start a fresh
