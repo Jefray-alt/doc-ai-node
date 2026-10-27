@@ -13,6 +13,14 @@
 5. Keep requirements, design, and tasks lightweight and focused on the current feature.
 6. After a feature is completed, update the roadmap.
 
+For code-change requests, the main session routes implementation to the
+configured `implementer` agent by default and passes along user requirements
+and decisions. Planning and exploration remain in the main session. Follow
+[docs/agent-workflow.md](docs/agent-workflow.md), including its clean-worktree
+and branch startup checks, serial independent review, review limit, and
+task-scoped commit rules. If a configured role is unavailable, report that and
+stop; do not silently fall back to another role or model.
+
 ## Guardrails
 - Never start coding during product planning.
 - Ask for approval before changing MVP scope.
@@ -31,14 +39,3 @@
 - Use Conventional Commits: `<type>(<optional scope>): <imperative description>`.
 - Use a lowercase description without a trailing period. Prefer standard types such as `feat`, `fix`, `docs`, `refactor`, `test`, `build`, `ci`, and `chore`.
 - Mark breaking changes with `!` and explain them in a `BREAKING CHANGE:` footer.
-
-
-<!-- openspec-tdd-workflow:start -->
-For OpenSpec implementation requests (including openspec-apply-change and opsx apply),
-load .agents/skills/openspec-tdd-apply/SKILL.md before editing code and use it as
-the implementation orchestrator. Delegate each task to a TDD developer and a
-separate independent reviewer. Process tasks serially; commit each reviewed task
-with only its relevant files and its checkbox. Preserve OpenSpec's readiness and
-scope checks. Do not run the stock implementation loop alongside this workflow.
-This routing applies only to implementation, not proposal, sync, or archive.
-<!-- openspec-tdd-workflow:end -->
