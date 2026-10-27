@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { S3Client } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { randomUUID } from 'node:crypto';
@@ -10,6 +10,7 @@ const UPLOAD_EXPIRY_SECONDS = 5 * 60;
 @Injectable()
 export class UploadsService {
   private readonly s3: S3Client;
+  private readonly logger = new Logger(UploadsService.name);
 
   constructor() {
     const endpoint = process.env.S3_ENDPOINT_URL;
@@ -31,17 +32,27 @@ export class UploadsService {
     const uploadId = randomUUID();
     const key = `incoming/${uploadId}.pdf`;
     const bucket = process.env.S3_QUARANTINE_BUCKET ?? 'doc-ai-local-quarantine';
-    const { url, fields } = await createPresignedPost(this.s3, {
-      Bucket: bucket,
-      Key: key,
-      Expires: UPLOAD_EXPIRY_SECONDS,
-      Fields: { 'Content-Type': 'application/pdf' },
-      Conditions: [
-        ['eq', '$key', key],
-        ['eq', '$Content-Type', 'application/pdf'],
-        ['content-length-range', 1, MAX_UPLOAD_BYTES],
-      ],
-    });
+    let url: string;
+    let fields: Record<string, string>;
+    try {
+      ({ url, fields } = await createPresignedPost(this.s3, {
+        Bucket: bucket,
+        Key: key,
+        Expires: UPLOAD_EXPIRY_SECONDS,
+        Fields: { 'Content-Type': 'application/pdf' },
+        Conditions: [
+          ['eq', '$key', key],
+          ['eq', '$Content-Type', 'application/pdf'],
+          ['content-length-range', 1, MAX_UPLOAD_BYTES],
+        ],
+      }));
+    } catch (error) {
+      this.logger.error(
+        'Failed to create presigned upload',
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new InternalServerErrorException('Failed to create presigned upload');
+    }
 
     return {
       uploadId,

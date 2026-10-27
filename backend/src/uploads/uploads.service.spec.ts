@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { InternalServerErrorException, Logger } from '@nestjs/common';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { UploadsService } from './uploads.service.js';
 import { MAX_UPLOAD_BYTES } from './uploads.constants.js';
@@ -46,6 +47,7 @@ describe('UploadsService', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
@@ -110,17 +112,28 @@ describe('UploadsService', () => {
     expect(createClient).toHaveBeenCalledWith({ region: 'us-east-1' });
   });
 
-  it('propagates presigner failures', async () => {
+  it('logs presigner failures and returns a generic internal server error', async () => {
     const failure = new Error('presigner unavailable');
+    const loggerError = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
     vi.mocked(createPresignedPost).mockRejectedValueOnce(failure);
     const service = new UploadsService();
 
-    await expect(
-      service.createPresignedUpload({
+    const thrown = await service
+      .createPresignedUpload({
         filename: 'report.pdf',
         contentType: 'application/pdf',
         sizeBytes: 1024,
-      }),
-    ).rejects.toBe(failure);
+      })
+      .catch((error: unknown) => error);
+
+    expect(thrown).toBeInstanceOf(InternalServerErrorException);
+    const httpError = thrown as InternalServerErrorException;
+    expect(thrown).toMatchObject({
+      status: 500,
+      response: { statusCode: 500, message: 'Failed to create presigned upload', error: 'Internal Server Error' },
+    });
+    expect(thrown).not.toHaveProperty('cause');
+    expect(JSON.stringify(httpError.getResponse())).not.toContain(failure.message);
+    expect(loggerError).toHaveBeenCalledWith('Failed to create presigned upload', failure.stack);
   });
 });
