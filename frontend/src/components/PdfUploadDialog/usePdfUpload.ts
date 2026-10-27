@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { pdfFileSchema } from './PdfUploadDialog.schema'
 
 type UploadStatus = 'idle' | 'uploading' | 'success' | 'error'
@@ -12,6 +12,14 @@ export function usePdfUpload(onUploadSuccess?: (fileName: string) => void) {
   const [file, setFile] = useState<File | null>(null)
   const [status, setStatus] = useState<UploadStatus>('idle')
   const [errorMessage, setErrorMessage] = useState('')
+  const sessionRef = useRef(0)
+
+  const resetSession = useCallback(() => {
+    sessionRef.current += 1
+    setFile(null)
+    setStatus('idle')
+    setErrorMessage('')
+  }, [])
 
   function selectFile(selectedFile: File | null) {
     setErrorMessage('')
@@ -35,6 +43,7 @@ export function usePdfUpload(onUploadSuccess?: (fileName: string) => void) {
   async function uploadFile() {
     if (!file || status === 'uploading') return
 
+    const session = sessionRef.current
     setStatus('uploading')
     setErrorMessage('')
     try {
@@ -48,8 +57,10 @@ export function usePdfUpload(onUploadSuccess?: (fileName: string) => void) {
         }),
       })
       if (!authorizationResponse.ok) throw new Error('authorization failed')
+      if (session !== sessionRef.current) return
 
       const authorization = await authorizationResponse.json() as PresignedUpload
+      if (session !== sessionRef.current) return
       const formData = new FormData()
       for (const [name, value] of Object.entries(authorization.fields)) {
         formData.append(name, value)
@@ -61,14 +72,16 @@ export function usePdfUpload(onUploadSuccess?: (fileName: string) => void) {
         body: formData,
       })
       if (!uploadResponse.ok) throw new Error('storage upload failed')
+      if (session !== sessionRef.current) return
 
       setStatus('success')
       onUploadSuccess?.(file.name)
     } catch {
+      if (session !== sessionRef.current) return
       setStatus('error')
       setErrorMessage('Upload failed. Please try again.')
     }
   }
 
-  return { file, status, errorMessage, selectFile, uploadFile }
+  return { file, status, errorMessage, selectFile, uploadFile, resetSession }
 }

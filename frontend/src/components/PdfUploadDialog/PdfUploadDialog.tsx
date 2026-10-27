@@ -1,11 +1,27 @@
 import { Button, Group, Modal, Text } from '@mantine/core'
+import { useCallback, useLayoutEffect, useRef } from 'react'
 import type { ChangeEvent } from 'react'
 import type { PdfUploadDialogProps } from './PdfUploadDialog.types'
 import { usePdfUpload } from './usePdfUpload'
 import classes from './PdfUploadDialog.module.css'
 
 export function PdfUploadDialog({ opened, onClose, onUploadSuccess }: PdfUploadDialogProps) {
-  const { file, status, errorMessage, selectFile, uploadFile } = usePdfUpload(onUploadSuccess)
+  const { file, status, errorMessage, selectFile, uploadFile, resetSession } = usePdfUpload(onUploadSuccess)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const resetForClose = useCallback(() => {
+    resetSession()
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [resetSession])
+
+  useLayoutEffect(() => {
+    if (!opened) resetForClose()
+  }, [opened, resetForClose])
+
+  function handleClose() {
+    resetForClose()
+    onClose()
+  }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     selectFile(event.currentTarget.files?.[0] ?? null)
@@ -14,7 +30,7 @@ export function PdfUploadDialog({ opened, onClose, onUploadSuccess }: PdfUploadD
   return (
     <Modal
       opened={opened}
-      onClose={onClose}
+      onClose={handleClose}
       title="Add a PDF"
       centered
       size={460}
@@ -49,6 +65,7 @@ export function PdfUploadDialog({ opened, onClose, onUploadSuccess }: PdfUploadD
               <input
                 className={classes.fileInput}
                 id="pdf-file"
+                ref={fileInputRef}
                 type="file"
                 aria-label="Choose a PDF"
                 aria-describedby={errorMessage ? 'pdf-file-limits pdf-file-error' : 'pdf-file-limits'}
@@ -83,7 +100,7 @@ export function PdfUploadDialog({ opened, onClose, onUploadSuccess }: PdfUploadD
         )}
       </div>
       <Group justify="flex-end" gap="sm" className={classes.footer}>
-        <Button variant="default" onClick={onClose}>
+        <Button variant="default" onClick={handleClose}>
           {status === 'success' ? 'Done' : 'Close'}
         </Button>
         {status !== 'success' && (
