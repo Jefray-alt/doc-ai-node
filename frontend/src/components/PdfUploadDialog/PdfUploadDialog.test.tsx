@@ -54,7 +54,7 @@ describe('PdfUploadDialog', () => {
     expect(await uploadedFile.text()).toBe(await file.text())
   })
 
-  it('rejects a non-PDF selection before contacting the API', async () => {
+  it('reports a specific error for a non-PDF selection before contacting the API', async () => {
     const user = userEvent.setup({ applyAccept: false })
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
@@ -65,8 +65,64 @@ describe('PdfUploadDialog', () => {
       new File(['text'], 'notes.txt', { type: 'text/plain' }),
     )
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Choose a PDF file no larger than 20 MiB.')
+    expect(screen.getByRole('alert')).toHaveTextContent('Choose a PDF file.')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    new File(['text'], 'notes.pdf', { type: 'text/plain' }),
+    new File(['text'], 'notes.txt', { type: 'application/pdf' }),
+  ])('requires both PDF MIME type and a .pdf filename', async (invalidFile) => {
+    const user = userEvent.setup({ applyAccept: false })
+    render(<PdfUploadDialog opened onClose={vi.fn()} />)
+
+    await user.upload(screen.getByLabelText('Choose a PDF'), invalidFile)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Choose a PDF file.')
+    expect(screen.getByRole('button', { name: 'Upload PDF' })).toBeDisabled()
+  })
+
+  it('reports when an otherwise valid PDF is empty', async () => {
+    const user = userEvent.setup({ applyAccept: false })
+    render(<PdfUploadDialog opened onClose={vi.fn()} />)
+
+    await user.upload(
+      screen.getByLabelText('Choose a PDF'),
+      new File([], 'empty.pdf', { type: 'application/pdf' }),
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The PDF file is empty.')
+    expect(screen.getByRole('button', { name: 'Upload PDF' })).toBeDisabled()
+  })
+
+  it('reports when a PDF exceeds the 20 MiB limit', async () => {
+    const user = userEvent.setup({ applyAccept: false })
+    render(<PdfUploadDialog opened onClose={vi.fn()} />)
+
+    await user.upload(
+      screen.getByLabelText('Choose a PDF'),
+      new File([new Uint8Array(20 * 1024 * 1024 + 1)], 'large.pdf', { type: 'application/pdf' }),
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent('PDF files must be no larger than 20 MiB.')
+    expect(screen.getByRole('button', { name: 'Upload PDF' })).toBeDisabled()
+  })
+
+  it('accepts PDF files at both size boundaries and a case-insensitive extension', async () => {
+    const user = userEvent.setup({ applyAccept: false })
+    render(<PdfUploadDialog opened onClose={vi.fn()} />)
+    const picker = screen.getByLabelText('Choose a PDF')
+
+    await user.upload(picker, new File(['x'], 'tiny.PDF', { type: 'application/pdf' }))
+    expect(screen.getByRole('button', { name: 'Upload PDF' })).toBeEnabled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    await user.upload(
+      picker,
+      new File([new Uint8Array(20 * 1024 * 1024)], 'maximum.pdf', { type: 'application/pdf' }),
+    )
+    expect(screen.getByRole('button', { name: 'Upload PDF' })).toBeEnabled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('keeps the selected file available for retry after a failed storage upload', async () => {

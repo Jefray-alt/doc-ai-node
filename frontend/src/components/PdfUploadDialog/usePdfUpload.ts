@@ -1,6 +1,5 @@
 import { useState } from 'react'
-
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+import { pdfFileSchema } from './PdfUploadDialog.schema'
 
 type UploadStatus = 'idle' | 'uploading' | 'success' | 'error'
 
@@ -17,18 +16,20 @@ export function usePdfUpload(onUploadSuccess?: (fileName: string) => void) {
   function selectFile(selectedFile: File | null) {
     setErrorMessage('')
     setStatus('idle')
-    if (
-      selectedFile &&
-      (selectedFile.type !== 'application/pdf' ||
-        !selectedFile.name.toLowerCase().endsWith('.pdf') ||
-        selectedFile.size < 1 ||
-        selectedFile.size > MAX_UPLOAD_BYTES)
-    ) {
+
+    if (selectedFile === null) {
       setFile(null)
-      setErrorMessage('Choose a PDF file no larger than 20 MiB.')
       return
     }
-    setFile(selectedFile)
+
+    const validation = pdfFileSchema.safeParse(selectedFile)
+    if (!validation.success) {
+      setFile(null)
+      setErrorMessage(validation.error.issues[0]?.message ?? 'Choose a PDF file.')
+      return
+    }
+
+    setFile(validation.data)
   }
 
   async function uploadFile() {
