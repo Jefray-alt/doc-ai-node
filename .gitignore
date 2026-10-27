@@ -9,3 +9,4 @@
 !.agents/skills/openspec-update-change/
 !.agents/skills/openspec-tdd-apply/
 .worktrees/
+/.env

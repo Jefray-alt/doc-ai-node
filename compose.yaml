@@ -1,0 +1,24 @@
+services:
+  floci:
+    image: floci/floci:2.3.0-compat
+    ports:
+      - "127.0.0.1:4566:4566"
+    env_file:
+      - .env
+    environment:
+      FLOCI_STORAGE_MODE: persistent
+      FLOCI_STORAGE_PERSISTENT_PATH: /app/data
+    volumes:
+      - floci-data:/app/data
+      - ./infra/floci/init:/etc/floci/init/start.d:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - aws s3api head-bucket --bucket "$${S3_BUCKET_NAME:?Set S3_BUCKET_NAME in .env}" >/dev/null 2>&1
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  floci-data:
