@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { render } from '../../test/render'
 import type { ConversationProps } from '../Conversation/Conversation.types'
 import type { MessageComposerProps } from '../MessageComposer/MessageComposer.types'
-import type { PdfAvailabilityModalProps } from '../PdfAvailabilityModal/PdfAvailabilityModal.types'
+import type { PdfUploadDialogProps } from '../PdfUploadDialog/PdfUploadDialog.types'
 import { ChatWorkspace } from './ChatWorkspace'
 
 vi.mock('../AppHeader/AppHeader', () => ({
@@ -27,10 +27,13 @@ vi.mock('../MessageComposer/MessageComposer', () => ({
   ),
 }))
 
-vi.mock('../PdfAvailabilityModal/PdfAvailabilityModal', () => ({
-  PdfAvailabilityModal: ({ opened, onClose }: PdfAvailabilityModalProps) => opened ? (
+vi.mock('../PdfUploadDialog/PdfUploadDialog', () => ({
+  PdfUploadDialog: ({ opened, onClose, onUploadSuccess }: PdfUploadDialogProps) => opened ? (
     <div role="dialog" aria-label="Mock PDF information">
       <button type="button" onClick={onClose}>Close mocked PDF information</button>
+        <button type="button" onClick={() => onUploadSuccess?.('source.pdf')}>
+          Simulate PDF upload
+        </button>
     </div>
   ) : null,
 }))
@@ -59,5 +62,16 @@ describe('ChatWorkspace', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Close mocked PDF information' }))
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('shows the uploaded PDF status and prevents attaching a second file', async () => {
+    const user = userEvent.setup()
+    render(<ChatWorkspace />)
+
+    await user.click(screen.getByRole('button', { name: 'Add PDF' }))
+    await user.click(screen.getByRole('button', { name: 'Simulate PDF upload' }))
+
+    expect(screen.getByText('source.pdf · Uploaded, awaiting validation')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'PDF uploaded' })).toBeDisabled()
   })
 })
