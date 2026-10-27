@@ -15,11 +15,14 @@
 
 For code-change requests, the main session routes implementation to the
 configured `implementer` agent by default and passes along user requirements
-and decisions. Planning and exploration remain in the main session. Follow
-[docs/agent-workflow.md](docs/agent-workflow.md), including its clean-worktree
-and branch startup checks, serial independent review, review limit, and
-task-scoped commit rules. If a configured role is unavailable, report that and
-stop; do not silently fall back to another role or model.
+and decisions. Planning and exploration remain in the main session. Before
+workers start, the main session publishes an ordered task and commit plan. Split
+substantive requests into cohesive reviewable tasks; use one task only when the
+work is genuinely small and indivisible, and state why. Complete each task's
+review and commit before starting the next, keeping task commits separate.
+Follow [docs/agent-workflow.md](docs/agent-workflow.md) for the startup checks,
+review protocol, and commit rules. If a configured role is unavailable, report
+that and stop; do not silently fall back to another role or model.
 
 ## Guardrails
 - Never start coding during product planning.
