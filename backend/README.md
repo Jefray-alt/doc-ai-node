@@ -11,12 +11,13 @@ Use Node.js 24 LTS and npm. From the repository root:
 cd backend
 nvm use # If you use nvm
 npm ci
+cp .env.example .env
 npm run dev
 ```
 
-The API listens on port 3000 by default. Optionally copy `.env.example` to `.env`
-and change `PORT`. Both `dev` and `start` load this file when present; an existing
-shell environment variable takes precedence.
+The API listens on port 3000 by default. Copy `.env.example` to `.env` to use
+local Floci credentials and the quarantine bucket. Both `dev` and `start` load
+this file when present; an existing shell environment variable takes precedence.
 
 Development uses the Nest CLI compiler in watch mode. It recompiles and restarts
 when source changes. `build` clears and compiles production output to `dist/`;
@@ -35,6 +36,8 @@ npm start
 
 `npm test` runs all discovered unit and e2e suites. `npm run test:e2e` runs the
 HTTP and process-level suites under `test/`.
+`npm run test:floci` exercises the signed quarantine POST against the local
+Floci service and verifies the uploaded object is absent from the ingestion bucket.
 
 ## Health endpoint
 
@@ -49,7 +52,16 @@ curl -i http://localhost:3000/health
 ```
 
 This endpoint confirms the API process can respond. It does not check external
-services. PDF upload, session handling, and frontend integration are still pending.
+services. PDF processing, validation, promotion from quarantine, and session
+handling are still pending.
+
+## Direct PDF uploads
+
+`POST /uploads/presign` accepts a PDF filename, `application/pdf` content type,
+and file size. It returns a short-lived presigned POST for a generated key in
+`doc-ai-local-quarantine`. The browser sends the file directly to Floci; the API
+does not receive the file bytes. A successful storage response means the PDF is
+awaiting validation and does not make it available for chat.
 
 ## Backend conventions
 

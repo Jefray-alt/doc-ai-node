@@ -51,8 +51,10 @@ The chat workspace supports sending messages with the Send button or Enter.
 Use Shift + Enter for a new line. Messages stay in memory for the current tab and
 are cleared when you refresh or close it; there are no accounts or saved chats.
 
-The Add PDF entry point currently opens an availability notice. PDF upload,
-document processing, and generated answers belong to later backlog features.
+Use Add PDF to upload one PDF directly into the quarantine bucket. After upload,
+the workspace shows that the PDF is awaiting validation. The chat cannot use it
+until later processing and promotion steps are implemented. Upload status is
+held in memory and clears when you refresh the tab.
 
 ### Backend
 
@@ -62,6 +64,7 @@ From the repository root:
 cd backend
 nvm use # If you use nvm
 npm ci
+cp .env.example .env
 npm run dev
 ```
 
@@ -75,8 +78,8 @@ Run `npm test` for all TypeScript suites or `npm run test:e2e` for HTTP and
 process-level coverage. Backend modules, naming, and testing conventions are
 documented in [backend/README.md](backend/README.md).
 
-PDF upload, generated answers, and frontend/backend integration remain to be
-implemented.
+PDF validation, promotion from quarantine, document processing, and generated
+answers remain to be implemented.
 
 ### Local S3 storage
 
@@ -89,8 +92,10 @@ docker compose up -d --wait
 sh scripts/floci/smoke.sh
 ```
 
-Compose waits until the development bucket responds to an S3 readiness
-check. The smoke check uploads a temporary object, compares its downloaded
+Compose waits until both the ingestion bucket (`doc-ai-local-pdfs`) and
+quarantine bucket (`doc-ai-local-quarantine`) respond to S3 readiness checks.
+The quarantine bucket allows browser POST uploads from the local Vite origins.
+The smoke check uploads a temporary object to each bucket, compares downloaded
 bytes, and confirms deletion. It needs no AWS account or host AWS CLI.
 
 See [.env.example](.env.example) for the local storage configuration loaded from

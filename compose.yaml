@@ -14,7 +14,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - aws s3api head-bucket --bucket "$${S3_BUCKET_NAME:?Set S3_BUCKET_NAME in .env}" >/dev/null 2>&1
+        - aws s3api head-bucket --bucket "$${S3_BUCKET_NAME:?Set S3_BUCKET_NAME in .env}" >/dev/null 2>&1 && aws s3api head-bucket --bucket "$${S3_QUARANTINE_BUCKET_NAME:?Set S3_QUARANTINE_BUCKET_NAME in .env}" >/dev/null 2>&1
       interval: 5s
       timeout: 3s
       retries: 20
