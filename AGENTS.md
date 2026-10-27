@@ -13,6 +13,14 @@
 5. Keep requirements, design, and tasks lightweight and focused on the current feature.
 6. After a feature is completed, update the roadmap.
 
+For code-change requests, the main session routes implementation to the
+configured `implementer` agent by default and passes along user requirements
+and decisions. Planning and exploration remain in the main session. Follow
+[docs/agent-workflow.md](docs/agent-workflow.md), including its clean-worktree
+and branch startup checks, serial independent review, review limit, and
+task-scoped commit rules. If a configured role is unavailable, report that and
+stop; do not silently fall back to another role or model.
+
 ## Guardrails
 - Never start coding during product planning.
 - Ask for approval before changing MVP scope.

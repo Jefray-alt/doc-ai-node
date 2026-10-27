@@ -12,6 +12,13 @@ dependencies inside each application, in `frontend/` and `backend/`.
 - `backend/`: NestJS + TypeScript REST API using Nest's default Express adapter.
 - `docs/`: product brief, feature backlog, and roadmap.
 
+### Agent-assisted code changes
+
+Codex roles for implementation, development, and independent review are
+configured under `.codex/agents/`. Code changes follow
+[docs/agent-workflow.md](docs/agent-workflow.md); reload Codex after changing
+the role configuration if the roles are not available.
+
 ## Development
 
 Use Node.js 24 LTS and npm. Run each application in its own terminal.
