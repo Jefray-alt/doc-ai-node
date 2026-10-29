@@ -8,6 +8,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 const backend = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const entry = resolve(backend, 'dist/main.js');
+const workerEntry = resolve(backend, 'dist/worker.js');
 const children: ReturnType<typeof spawn>[] = [];
 const fixtures: string[] = [];
 
@@ -61,6 +62,42 @@ async function expectHealth(port: number, options: { filePort?: number; shellPor
   throw new Error(`Backend did not answer on port ${port}: ${output}`);
 }
 
+async function expectWorkerStartsFromEnvFile(): Promise<void> {
+  const cwd = fixture();
+  writeFileSync(resolve(cwd, '.env'), [
+    'SQS_QUEUE_URL=http://127.0.0.1:1/000000000000/worker-test',
+    'S3_QUARANTINE_BUCKET=quarantine',
+    'SQS_ENDPOINT_URL=http://127.0.0.1:1',
+    'SCAN_WORKER_CONCURRENCY=2',
+    'SCAN_WORKER_POLL_BACKOFF_MS=100',
+  ].join('\n'));
+  const env: NodeJS.ProcessEnv = { ...process.env, AWS_ACCESS_KEY_ID: 'test', AWS_SECRET_ACCESS_KEY: 'test', AWS_DEFAULT_REGION: 'us-east-1', SCAN_WORKER_CONCURRENCY: '3' };
+  delete env.SQS_QUEUE_URL;
+  delete env.S3_QUARANTINE_BUCKET;
+
+  const child = spawn(process.execPath, [workerEntry], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  children.push(child);
+  let output = '';
+  child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolveExit) => {
+    child.once('exit', (code, signal) => resolveExit({ code, signal }));
+  });
+
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline && !output.includes('Scan worker started with concurrency 3')) {
+    const exit = await Promise.race([
+      exited,
+      new Promise<undefined>((resolveDelay) => setTimeout(() => resolveDelay(undefined), 50)),
+    ]);
+    if (exit) throw new Error(`Worker exited before startup (${exit.code ?? exit.signal}): ${output}`);
+  }
+  expect(output).toContain('Scan worker started with concurrency 3');
+  child.kill('SIGINT');
+  const exit = await exited;
+  expect(exit.code).toBe(0);
+}
+
 describe.sequential('compiled process startup', () => {
   beforeAll(() => {
     execFileSync('npm', ['run', 'build'], { cwd: backend, stdio: 'inherit' });
@@ -108,5 +145,9 @@ describe.sequential('compiled process startup', () => {
     const filePort = await availablePort();
     const shellPort = await availablePort();
     await expectHealth(shellPort, { filePort, shellPort });
+  });
+
+  it('loads the worker queue from .env and preserves shell setting precedence', async () => {
+    await expectWorkerStartsFromEnvFile();
   });
 });
