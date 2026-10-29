@@ -14,9 +14,9 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - aws s3api head-bucket --bucket "$${S3_BUCKET_NAME:?Set S3_BUCKET_NAME in .env}" >/dev/null 2>&1 && aws s3api head-bucket --bucket "$${S3_QUARANTINE_BUCKET_NAME:?Set S3_QUARANTINE_BUCKET_NAME in .env}" >/dev/null 2>&1
+        - aws s3api head-bucket --bucket "$${S3_BUCKET_NAME:?Set S3_BUCKET_NAME in .env}" >/dev/null 2>&1 && aws s3api head-bucket --bucket "$${S3_QUARANTINE_BUCKET_NAME:?Set S3_QUARANTINE_BUCKET_NAME in .env}" >/dev/null 2>&1 && [ "$$(aws s3api get-bucket-versioning --bucket "$${S3_QUARANTINE_BUCKET_NAME}" --query Status --output text 2>/dev/null)" = Enabled ] && aws sqs get-queue-url --queue-name "$${SQS_QUEUE_NAME:?Set SQS_QUEUE_NAME in .env}" >/dev/null 2>&1 && aws sqs get-queue-url --queue-name "$${SQS_DLQ_NAME:?Set SQS_DLQ_NAME in .env}" >/dev/null 2>&1
       interval: 5s
-      timeout: 3s
+      timeout: 10s
       retries: 20
       start_period: 10s
 

@@ -10,7 +10,7 @@ This is a lightweight, outcome-oriented roadmap for a solo learning project. It 
 
 **Status:** MVP in progress. Frontend foundation and backlog feature 1, **Create the chat workspace**, are complete in `frontend/` using React, TypeScript, Vite, and Mantine. The workspace includes a conversation area, message composer, and an Add PDF entry point. Messages and upload status exist only in memory and clear on refresh. Document processing, generated answers, and evidence remain unimplemented.
 
-**Backend progress:** Backlog feature 2 now includes PDF authorization and direct upload into local quarantine storage. Session handling, PDF validation and processing, promotion to the ingestion bucket, and chat readiness remain pending. See [backend/README.md](../backend/README.md) for backend conventions.
+**Backend progress:** Backlog feature 2 includes PDF authorization, direct upload into local quarantine storage, and exact-version promotion after a clean scan result. PDF validation, document processing, session handling, and chat readiness remain pending. See [backend/README.md](../backend/README.md) for backend conventions and [quarantine scan operations](quarantine-scan-operations.md) for local simulation and production operations.
 
 **Local storage:** Persistent local Floci storage provides separate ingestion and quarantine buckets for feature 2. See [README local storage instructions](../README.md#local-s3-storage). Feature 2 remains in progress.
 

@@ -73,9 +73,10 @@ Use Shift + Enter for a new line. Messages stay in memory for the current tab an
 are cleared when you refresh or close it; there are no accounts or saved chats.
 
 Use Add PDF to upload one PDF directly into the quarantine bucket. After upload,
-the workspace shows that the PDF is awaiting validation. The chat cannot use it
-until later processing and promotion steps are implemented. Upload status is
-held in memory and clears when you refresh the tab.
+the workspace shows that the PDF is awaiting validation. The backend can promote
+an exact quarantine version after a clean scan result; PDF parsing, ingestion,
+and grounded chat are still pending. Upload status is held in memory and clears
+when you refresh the tab.
 
 ### Backend
 
@@ -96,8 +97,8 @@ Run `npm test` for all TypeScript suites or `npm run test:e2e` for HTTP and
 process-level coverage. Backend modules, naming, and testing conventions are
 documented in [backend/README.md](backend/README.md).
 
-PDF validation, promotion from quarantine, document processing, and generated
-answers remain to be implemented.
+PDF validation, document processing, and generated answers remain to be
+implemented.
 
 ### Local S3 storage
 
@@ -111,9 +112,9 @@ docker compose --project-name doc-ai-node up -d --wait floci
 COMPOSE_PROJECT_NAME=doc-ai-node sh scripts/floci/smoke.sh
 ```
 
-Compose waits until both the ingestion bucket (`doc-ai-local-pdfs`) and
-quarantine bucket (`doc-ai-local-quarantine`) respond to S3 readiness checks.
-The quarantine bucket allows browser POST uploads from the local Vite origins.
+Compose waits until both buckets, quarantine versioning, and the scan result
+queue and processing DLQ are ready. The quarantine bucket allows browser POST
+uploads from the local Vite origins.
 The smoke check uploads a temporary object to each bucket, compares downloaded
 bytes, and confirms deletion. It needs no AWS account or host AWS CLI.
 
@@ -127,6 +128,26 @@ keeping stored objects in the named Compose volume. The `doc-ai-node` project
 name also means a worktree shares that project's Floci data; when Compose
 configuration paths change between worktrees, it may safely recreate the
 container while retaining the named volume.
+
+To exercise scan-result handling without a scanner, start the API from
+`backend/` with `npm run dev`, then run the worker in another backend terminal
+with `npm run dev:scan-worker`. Upload a PDF through the UI or API, then publish
+a simulated result using its generated `incoming/<uuid>.pdf` key:
+
+```sh
+cd backend
+npm run simulate:scan -- incoming/<uuid>.pdf clean
+```
+
+The simulator reads the current version and ETag and sends a GuardDuty-shaped
+event to SQS; it does not inspect or scan file contents. See
+[quarantine scan operations](docs/quarantine-scan-operations.md) for supported
+outcomes and production operating guidance.
+
+Use `docker compose restart floci` to restart the service. `docker compose down`
+stops and removes its container while keeping stored objects in the Compose
+volume.
+
 
 To stop Floci while keeping the container and its data, run:
 
