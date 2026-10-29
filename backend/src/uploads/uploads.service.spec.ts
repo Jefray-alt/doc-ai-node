@@ -1,40 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { InternalServerErrorException, Logger } from '@nestjs/common';
+import type { S3Client } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
+import { getS3StorageConfig } from '../storage/s3-storage.config.js';
 import { UploadsService } from './uploads.service.js';
 import { MAX_UPLOAD_BYTES } from './uploads.constants.js';
 
-const { createClient, signPost } = vi.hoisted(() => ({
-  createClient: vi.fn(),
-  signPost: vi.fn(),
-}));
+const { signPost } = vi.hoisted(() => ({ signPost: vi.fn() }));
 
 vi.mock('node:crypto', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:crypto')>();
   return { ...actual, randomUUID: vi.fn() };
 });
 
-vi.mock('@aws-sdk/client-s3', () => ({
-  S3Client: class {
-    constructor(config: unknown) {
-      createClient(config);
-    }
-  },
-}));
-
 vi.mock('@aws-sdk/s3-presigned-post', () => ({ createPresignedPost: signPost }));
 
 const uploadId = '123e4567-e89b-42d3-a456-426614174000';
 const fixedNow = new Date('2026-01-02T03:04:05.000Z');
+const s3 = {} as S3Client;
+const makeService = () => new UploadsService(s3, getS3StorageConfig());
 
 describe('UploadsService', () => {
   beforeEach(() => {
     vi.stubEnv('AWS_DEFAULT_REGION', undefined);
     vi.stubEnv('AWS_ACCESS_KEY_ID', undefined);
     vi.stubEnv('AWS_SECRET_ACCESS_KEY', undefined);
+    vi.stubEnv('AWS_SESSION_TOKEN', undefined);
     vi.stubEnv('S3_ENDPOINT_URL', undefined);
     vi.stubEnv('S3_QUARANTINE_BUCKET', undefined);
+    vi.stubEnv('S3_CLEAN_BUCKET', undefined);
     vi.mocked(randomUUID).mockReturnValue(uploadId);
     vi.mocked(createPresignedPost).mockResolvedValue({
       url: 'https://storage.example.test/quarantine',
@@ -52,8 +47,7 @@ describe('UploadsService', () => {
   });
 
   it('creates a five-minute PDF POST policy for a generated quarantine key', async () => {
-    const service = new UploadsService();
-    const response = await service.createPresignedUpload({
+    const response = await makeService().createPresignedUpload({
       filename: 'report.pdf',
       contentType: 'application/pdf',
       sizeBytes: 1024,
@@ -65,7 +59,7 @@ describe('UploadsService', () => {
       fields: { key: `incoming/${uploadId}.pdf`, Policy: 'signed-policy' },
       expiresAt: '2026-01-02T03:09:05.000Z',
     });
-    expect(signPost).toHaveBeenCalledWith(expect.anything(), {
+    expect(signPost).toHaveBeenCalledWith(s3, {
       Bucket: 'doc-ai-local-quarantine',
       Key: `incoming/${uploadId}.pdf`,
       Expires: 5 * 60,
@@ -78,47 +72,34 @@ describe('UploadsService', () => {
     });
   });
 
-  it('uses the configured bucket and S3 client endpoint, region, and credentials', async () => {
-    vi.stubEnv('AWS_DEFAULT_REGION', 'eu-west-2');
-    vi.stubEnv('AWS_ACCESS_KEY_ID', 'test-access-key');
-    vi.stubEnv('AWS_SECRET_ACCESS_KEY', 'test-secret-key');
-    vi.stubEnv('S3_ENDPOINT_URL', 'http://localhost:4566');
+  it('uses the shared storage config bucket while keeping the upload policy unchanged', async () => {
     vi.stubEnv('S3_QUARANTINE_BUCKET', 'custom-quarantine');
 
-    const service = new UploadsService();
-    await service.createPresignedUpload({
+    await makeService().createPresignedUpload({
       filename: 'report.pdf',
       contentType: 'application/pdf',
       sizeBytes: 1024,
     });
 
-    expect(createClient).toHaveBeenCalledWith({
-      region: 'eu-west-2',
-      endpoint: 'http://localhost:4566',
-      forcePathStyle: true,
-      credentials: {
-        accessKeyId: 'test-access-key',
-        secretAccessKey: 'test-secret-key',
-      },
+    expect(signPost).toHaveBeenCalledWith(s3, expect.objectContaining({ Bucket: 'custom-quarantine' }));
+    expect(signPost.mock.calls[0]?.[1]).toMatchObject({
+      Key: `incoming/${uploadId}.pdf`,
+      Expires: 5 * 60,
+      Fields: { 'Content-Type': 'application/pdf' },
+      Conditions: [
+        ['eq', '$key', `incoming/${uploadId}.pdf`],
+        ['eq', '$Content-Type', 'application/pdf'],
+        ['content-length-range', 1, MAX_UPLOAD_BYTES],
+      ],
     });
-    expect(signPost).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      Bucket: 'custom-quarantine',
-    }));
-  });
-
-  it('uses the default region without endpoint or credentials when none are configured', () => {
-    new UploadsService();
-
-    expect(createClient).toHaveBeenCalledWith({ region: 'us-east-1' });
   });
 
   it('logs presigner failures and returns a generic internal server error', async () => {
     const failure = new Error('presigner unavailable');
     const loggerError = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
     vi.mocked(createPresignedPost).mockRejectedValueOnce(failure);
-    const service = new UploadsService();
 
-    const thrown = await service
+    const thrown = await makeService()
       .createPresignedUpload({
         filename: 'report.pdf',
         contentType: 'application/pdf',
