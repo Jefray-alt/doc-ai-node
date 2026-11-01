@@ -1,0 +1,12 @@
+{
+  "name": "doc-ai-node",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "predev": "docker compose --project-name doc-ai-node up -d --wait floci",
+    "dev": "concurrently --kill-others --success first --names frontend,backend --prefix name --prefix-colors cyan,magenta \"npm --prefix frontend run dev\" \"npm --prefix backend run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

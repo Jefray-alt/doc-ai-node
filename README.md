@@ -5,8 +5,9 @@ A single-PDF chat application for learning the RAG flow. Product scope lives in
 
 ## Repository
 
-This monorepo keeps Node configuration, package manifests, lockfiles, and
-dependencies inside each application, in `frontend/` and `backend/`.
+This monorepo keeps a root launcher and its `concurrently` dependency at the
+repository root. Application dependencies and lockfiles remain inside
+`frontend/` and `backend/`.
 
 - `frontend/`: React + TypeScript SPA using Vite and Mantine.
 - `backend/`: NestJS + TypeScript REST API using Nest's default Express adapter.
@@ -21,31 +22,51 @@ the role configuration if the roles are not available.
 
 ## Development
 
-Use Node.js 24 LTS and npm. Run each application in its own terminal.
-
-### Frontend
-
-From the repository root:
+Use Node.js 24 LTS and npm. Install dependencies from the repository root and
+each application directory:
 
 ```sh
-cd frontend
-nvm use # If you use nvm
+nvm use 24 # If you use nvm
 npm ci
+(cd frontend && npm ci)
+(cd backend && npm ci)
+```
+
+Prepare local environment files once. These commands copy examples only when
+the destination does not already exist, so they preserve local settings:
+
+```sh
+test -f .env || cp .env.example .env
+test -f backend/.env || cp backend/.env.example backend/.env
+```
+
+Start the complete development environment from the repository root:
+
+```sh
 npm run dev
 ```
 
-Open the local URL printed by Vite (normally `http://localhost:5173`).
+The launcher starts Floci with Docker Compose and waits for its bucket health
+checks before starting Vite and the NestJS API. Both application logs are
+labeled in the terminal. Vite and Nest watch source files and reload as you
+edit; open the URL printed by Vite (normally `http://localhost:5173`). Press
+Ctrl+C to stop both application processes. Floci stays running and retains its
+data.
+
+To run one application alone, use the existing application scripts:
 
 ```sh
+cd frontend
+npm run dev
 npm run typecheck
 npm run lint
 npm run build
 npm run preview
 ```
 
-Run frontend npm commands from `frontend/`. `build` produces `frontend/dist/`.
-`preview` serves that production build locally.
-To pass arguments to Vite, use `npm run dev -- --host 0.0.0.0`.
+Run frontend npm commands from `frontend/`. `build` produces `frontend/dist/`;
+`preview` serves that production build locally. To pass arguments to Vite, use
+`npm run dev -- --host 0.0.0.0`.
 
 The chat workspace supports sending messages with the Send button or Enter.
 Use Shift + Enter for a new line. Messages stay in memory for the current tab and
@@ -58,13 +79,10 @@ held in memory and clears when you refresh the tab.
 
 ### Backend
 
-From the repository root:
+Run backend npm commands from `backend/`:
 
 ```sh
 cd backend
-nvm use # If you use nvm
-npm ci
-cp .env.example .env
 npm run dev
 ```
 
@@ -83,13 +101,14 @@ answers remain to be implemented.
 
 ### Local S3 storage
 
-Local PDF storage uses Floci, an S3-compatible service in Docker. Start it from
-the repository root with Docker Engine and Docker Compose v2:
+Local PDF storage uses Floci, an S3-compatible service in Docker. The root
+`npm run dev` command starts it with Docker Engine and Docker Compose v2. To
+start Floci by itself, use the same explicit Compose project name used by the
+launcher:
 
 ```sh
-cp .env.example .env
-docker compose up -d --wait
-sh scripts/floci/smoke.sh
+docker compose --project-name doc-ai-node up -d --wait floci
+COMPOSE_PROJECT_NAME=doc-ai-node sh scripts/floci/smoke.sh
 ```
 
 Compose waits until both the ingestion bucket (`doc-ai-local-pdfs`) and
@@ -99,13 +118,25 @@ The smoke check uploads a temporary object to each bucket, compares downloaded
 bytes, and confirms deletion. It needs no AWS account or host AWS CLI.
 
 See [.env.example](.env.example) for the local storage configuration loaded from
-`.env`. To inspect startup or initialization errors, run `docker compose logs floci`.
+`.env`. To inspect startup or initialization errors, run
+`docker compose --project-name doc-ai-node logs floci`. Use the same project
+name for other Compose commands, such as `restart floci` or `stop floci`, so
+they address the launcher's service. `stop floci` stops the service while
+keeping its container and data. `down` stops and removes the container while
+keeping stored objects in the named Compose volume. The `doc-ai-node` project
+name also means a worktree shares that project's Floci data; when Compose
+configuration paths change between worktrees, it may safely recreate the
+container while retaining the named volume.
 
-Use `docker compose restart floci` to restart the service. `docker compose down`
-stops and removes its container while keeping stored objects in the Compose
-volume. To deliberately clear local data and recreate an empty bucket, run:
+To stop Floci while keeping the container and its data, run:
 
 ```sh
-docker compose down -v
-docker compose up -d --wait
+docker compose --project-name doc-ai-node stop floci
+```
+
+To deliberately clear local data and recreate an empty bucket, run:
+
+```sh
+docker compose --project-name doc-ai-node down -v
+docker compose --project-name doc-ai-node up -d --wait floci
 ```

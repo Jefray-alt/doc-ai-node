@@ -2,4 +2,5 @@
 !.agents/skills/
 .agents/skills/*
 .worktrees/
+/node_modules/
 /.env
