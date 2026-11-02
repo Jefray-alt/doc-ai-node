@@ -38,6 +38,10 @@ that and stop; do not silently fall back to another role or model.
 - Keep `App.tsx` focused on composition. Extract state and interaction logic into focused hooks in the relevant component folder.
 - Keep Mantine theme configuration in `frontend/src/config/theme.ts`.
 
+## Code Readability
+- Separate distinct logical blocks with blank lines, such as guards, setup, processing, and returns; keep related statements grouped.
+- Use braced, multiline control flow for `if` statements and loops instead of cramped single-line bodies. Check spacing between blocks before finalizing code.
+
 ## Git Commits
 - Use Conventional Commits: `<type>(<optional scope>): <imperative description>`.
 - Use a lowercase description without a trailing period. Prefer standard types such as `feat`, `fix`, `docs`, `refactor`, `test`, `build`, `ci`, and `chore`.
