@@ -202,7 +202,10 @@ describe('ScanWorkerService', () => {
     const send = vi.fn(async (command: ReceiveMessageCommand | DeleteMessageCommand) => {
       if (command instanceof ReceiveMessageCommand) {
         receives += 1;
-        if (receives === 1) return { Messages: [message(cleanEvent(), 'r1'), message(cleanEvent({ id: 'event-2' }), 'r2')] };
+        if (receives === 1) {
+          return { Messages: [message(cleanEvent(), 'r1'), message(cleanEvent({ id: 'event-2' }), 'r2')] };
+        }
+
         return { Messages: [] };
       }
       return {};

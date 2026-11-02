@@ -81,22 +81,33 @@ export class ScanWorkerService {
           await this.waitForPollInterval();
         }
       } finally {
-        if (this.pollController === controller) this.pollController = undefined;
+        if (this.pollController === controller) {
+          this.pollController = undefined;
+        }
       }
 
-      if (this.stopping) break;
+      if (this.stopping) {
+        break;
+      }
+
       if (messages.length === 0) {
         await this.waitForPollInterval();
         continue;
       }
+
       const allowed = Math.min(freeSlots, 10);
-      for (const message of messages.slice(0, allowed)) this.startMessage(message);
+      for (const message of messages.slice(0, allowed)) {
+        this.startMessage(message);
+      }
     }
     this.logger.log('Scan worker polling stopped');
   }
 
   async stop(): Promise<void> {
-    if (this.stopping) return;
+    if (this.stopping) {
+      return;
+    }
+
     this.stopping = true;
     this.shutdownController.abort();
     this.pollController?.abort();
@@ -105,10 +116,18 @@ export class ScanWorkerService {
       let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         Promise.allSettled(activeAtShutdown.map((work) => work.promise)),
-        new Promise<void>((resolve) => { shutdownTimer = setTimeout(resolve, this.config.shutdownGraceMs); }),
+        new Promise<void>((resolve) => {
+          shutdownTimer = setTimeout(resolve, this.config.shutdownGraceMs);
+        }),
       ]);
-      if (shutdownTimer) clearTimeout(shutdownTimer);
-      for (const work of activeAtShutdown) work.controller.abort(new Error('Worker shutdown grace period ended'));
+      if (shutdownTimer) {
+        clearTimeout(shutdownTimer);
+      }
+
+      for (const work of activeAtShutdown) {
+        work.controller.abort(new Error('Worker shutdown grace period ended'));
+      }
+
       await Promise.allSettled(activeAtShutdown.map((work) => work.promise));
     }
     this.logger.log('Scan worker shutdown complete');
@@ -138,6 +157,7 @@ export class ScanWorkerService {
       this.logger.error(`Scan message left for retry${identity} durationMs=${Date.now() - startedAt}: ${this.errorMessage(error)}`);
       return;
     }
+
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
@@ -145,7 +165,10 @@ export class ScanWorkerService {
         reject(new Error('Processing deadline exceeded'));
       }, this.config.processingDeadlineMs);
       controller.signal.addEventListener('abort', () => {
-        if (timer) clearTimeout(timer);
+        if (timer) {
+          clearTimeout(timer);
+        }
+
         reject(controller.signal.reason instanceof Error ? controller.signal.reason : new Error('Processing aborted'));
       }, { once: true });
     });
@@ -160,13 +183,22 @@ export class ScanWorkerService {
             signal: controller.signal,
           });
         }
-        if (controller.signal.aborted) throw new Error('Processing deadline exceeded');
-        if (!message.ReceiptHandle) throw new Error('SQS message has no receipt handle');
+        if (controller.signal.aborted) {
+          throw new Error('Processing deadline exceeded');
+        }
+
+        if (!message.ReceiptHandle) {
+          throw new Error('SQS message has no receipt handle');
+        }
+
         await this.sqs.send(new DeleteMessageCommand({
           QueueUrl: this.config.queueUrl,
           ReceiptHandle: message.ReceiptHandle,
         }), { abortSignal: controller.signal });
-        if (controller.signal.aborted) throw new Error('Processing deadline exceeded');
+        if (controller.signal.aborted) {
+          throw new Error('Processing deadline exceeded');
+        }
+
         this.logger.log(`Scan message acknowledged eventId=${this.safeLogValue(parsed.eventId)} versionId=${this.safeLogValue(parsed.versionId)} outcome=${parsed.outcome} durationMs=${Date.now() - startedAt}`);
       };
       await Promise.race([work(), deadline]);
@@ -179,13 +211,19 @@ export class ScanWorkerService {
       ].filter(Boolean).join(' ');
       this.logger.error(`Scan message left for retry ${identity} durationMs=${Date.now() - startedAt}: ${this.errorMessage(error)}`);
     } finally {
-      if (timer) clearTimeout(timer);
+      if (timer) {
+        clearTimeout(timer);
+      }
+
       controller.abort();
     }
   }
 
   private parseMessage(message: Message): ParsedEvent {
-    if (!message.Body) throw new Error('SQS message body is empty');
+    if (!message.Body) {
+      throw new Error('SQS message body is empty');
+    }
+
     let event: ScanEvent;
     try {
       event = JSON.parse(message.Body) as ScanEvent;
@@ -197,15 +235,30 @@ export class ScanWorkerService {
     if (event?.source !== EVENT_SOURCE || event['detail-type'] !== EVENT_TYPE) {
       throw new Error('Unexpected EventBridge source or detail type');
     }
-    if (typeof event.id !== 'string' || event.id.trim() === '') throw new Error('EventBridge event ID is required');
-    if (detail?.resourceType !== 'S3_OBJECT') throw new Error('GuardDuty resource type must be S3_OBJECT');
-    if (object?.bucketName !== this.config.quarantineBucket) throw new Error('Scan event bucket does not match configured quarantine bucket');
+    if (typeof event.id !== 'string' || event.id.trim() === '') {
+      throw new Error('EventBridge event ID is required');
+    }
+
+    if (detail?.resourceType !== 'S3_OBJECT') {
+      throw new Error('GuardDuty resource type must be S3_OBJECT');
+    }
+
+    if (object?.bucketName !== this.config.quarantineBucket) {
+      throw new Error('Scan event bucket does not match configured quarantine bucket');
+    }
+
     const keyMatch = typeof object.objectKey === 'string' ? UPLOAD_KEY_PATTERN.exec(object.objectKey) : null;
-    if (!keyMatch) throw new Error('Scan event key must identify an incoming UUID PDF');
+    if (!keyMatch) {
+      throw new Error('Scan event key must identify an incoming UUID PDF');
+    }
+
     if (typeof object.versionId !== 'string' || !object.versionId.trim() || object.versionId.trim().toLowerCase() === 'null') {
       throw new Error('Scan event must include a non-null S3 version ID');
     }
-    if (typeof object.eTag !== 'string' || object.eTag.length === 0) throw new Error('Scan event must include an ETag');
+
+    if (typeof object.eTag !== 'string' || object.eTag.length === 0) {
+      throw new Error('Scan event must include an ETag');
+    }
 
     const scanStatus = detail.scanStatus;
     const result = detail.scanResultDetails?.scanResultStatus;
@@ -215,7 +268,9 @@ export class ScanWorkerService {
       || (scanStatus === 'COMPLETED' && result === 'THREATS_FOUND')
       || (scanStatus === 'SKIPPED' && (result === 'UNSUPPORTED' || result === 'ACCESS_DENIED'))
       || (scanStatus === 'FAILED' && result === 'FAILED');
-    if (!acknowledge) throw new Error('Unrecognized GuardDuty scan outcome');
+    if (!acknowledge) {
+      throw new Error('Unrecognized GuardDuty scan outcome');
+    }
 
     const hasQuotes = object.eTag.startsWith('"') && object.eTag.endsWith('"');
     const opaqueEtag = hasQuotes ? object.eTag.slice(1, -1) : object.eTag;
@@ -223,7 +278,10 @@ export class ScanWorkerService {
       const code = character.charCodeAt(0);
       return code !== 0x21 && !(code >= 0x23 && code <= 0x7e) && !(code >= 0x80 && code <= 0xff);
     });
-    if (!opaqueEtag || hasInvalidTagCharacter) throw new Error('Scan event ETag is not a valid entity tag');
+    if (!opaqueEtag || hasInvalidTagCharacter) {
+      throw new Error('Scan event ETag is not a valid entity tag');
+    }
+
     const etag = `"${opaqueEtag}"`;
     return {
       eventId: event.id,
@@ -237,16 +295,21 @@ export class ScanWorkerService {
   }
 
   private async waitForPollInterval(): Promise<void> {
-    if (this.stopping) return;
+    if (this.stopping) {
+      return;
+    }
+
     await new Promise<void>((resolve) => {
       if (this.shutdownController.signal.aborted) {
         resolve();
         return;
       }
+
       const onAbort = () => {
         clearTimeout(timer);
         resolve();
       };
+
       const timer = setTimeout(() => {
         this.shutdownController.signal.removeEventListener('abort', onAbort);
         resolve();

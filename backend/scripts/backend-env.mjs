@@ -4,7 +4,10 @@ export function loadBackendEnv(envFile = fileURLToPath(new URL('../.env', import
   try {
     process.loadEnvFile(envFile);
   } catch (error) {
-    if (error?.code === 'ENOENT') return;
+    if (error?.code === 'ENOENT') {
+      return;
+    }
+
     throw error;
   }
 }

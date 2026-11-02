@@ -31,7 +31,9 @@ export class QuarantinePromotionService {
     this.validate(input);
     const destinationKey = this.destinationKey(input.uploadId, input.versionId);
     const existing = await this.findExisting(input, destinationKey);
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
 
     const source = `${this.config.quarantineBucket}/${this.encodeKey(input.sourceKey)}?versionId=${encodeURIComponent(input.versionId)}`;
     try {
@@ -60,8 +62,11 @@ export class QuarantinePromotionService {
     } catch (error) {
       if (this.isConditionalConflict(error)) {
         const winner = await this.findExisting(input, destinationKey);
-        if (winner) return winner;
+        if (winner) {
+          return winner;
+        }
       }
+
       throw error;
     }
   }
@@ -70,10 +75,14 @@ export class QuarantinePromotionService {
     if (!input.versionId?.trim() || input.versionId.trim().toLowerCase() === 'null') {
       throw new Error('A non-null S3 version ID is required for quarantine promotion');
     }
-    if (!input.etag?.trim()) throw new Error('An ETag is required for quarantine promotion');
+    if (!input.etag?.trim()) {
+      throw new Error('An ETag is required for quarantine promotion');
+    }
+
     if (!input.uploadId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.uploadId)) {
       throw new Error('A UUID upload ID is required for quarantine promotion');
     }
+
     if (input.sourceKey !== `incoming/${input.uploadId}.pdf`) {
       throw new Error('The quarantine object key does not match the upload ID');
     }
@@ -96,7 +105,10 @@ export class QuarantinePromotionService {
     try {
       head = await this.send(new HeadObjectCommand({ Bucket: this.config.cleanBucket, Key: key }), input.signal);
     } catch (error) {
-      if (this.isNotFound(error)) return undefined;
+      if (this.isNotFound(error)) {
+        return undefined;
+      }
+
       throw error;
     }
 
@@ -109,6 +121,7 @@ export class QuarantinePromotionService {
     if (!matches) {
       throw new ConflictException('A different quarantine object version already occupies the clean destination');
     }
+
     return {
       status: 'already-promoted',
       bucket: this.config.cleanBucket,
@@ -123,13 +136,19 @@ export class QuarantinePromotionService {
   }
 
   private isNotFound(error: unknown): boolean {
-    if (!error || typeof error !== 'object') return false;
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
     const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } };
     return candidate.name === 'NotFound' || candidate.name === 'NoSuchKey' || candidate.$metadata?.httpStatusCode === 404;
   }
 
   private isConditionalConflict(error: unknown): boolean {
-    if (!error || typeof error !== 'object') return false;
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
     const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } };
     return candidate.name === 'PreconditionFailed'
       || candidate.name === 'ConditionalRequestConflict'

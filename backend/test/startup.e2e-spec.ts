@@ -25,17 +25,25 @@ async function availablePort(): Promise<number> {
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Could not allocate a port');
+  if (!address || typeof address === 'string') {
+    throw new Error('Could not allocate a port');
+  }
+
   await new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
   return address.port;
 }
 
 async function expectHealth(port: number, options: { filePort?: number; shellPort?: number } = {}) {
   const cwd = fixture();
-  if (options.filePort !== undefined) writeFileSync(resolve(cwd, '.env'), `PORT=${options.filePort}\n`);
+  if (options.filePort !== undefined) {
+    writeFileSync(resolve(cwd, '.env'), `PORT=${options.filePort}\n`);
+  }
+
   const env = { ...process.env };
   delete env.PORT;
-  if (options.shellPort !== undefined) env.PORT = String(options.shellPort);
+  if (options.shellPort !== undefined) {
+    env.PORT = String(options.shellPort);
+  }
 
   const child = spawn(process.execPath, [entry], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(child);
@@ -45,7 +53,10 @@ async function expectHealth(port: number, options: { filePort?: number; shellPor
 
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`Backend exited (${child.exitCode}): ${output}`);
+    if (child.exitCode !== null) {
+      throw new Error(`Backend exited (${child.exitCode}): ${output}`);
+    }
+
     let response: Response;
     try {
       response = await fetch(`http://127.0.0.1:${port}/health`);
@@ -90,7 +101,9 @@ async function expectWorkerStartsFromEnvFile(): Promise<void> {
       exited,
       new Promise<undefined>((resolveDelay) => setTimeout(() => resolveDelay(undefined), 50)),
     ]);
-    if (exit) throw new Error(`Worker exited before startup (${exit.code ?? exit.signal}): ${output}`);
+    if (exit) {
+      throw new Error(`Worker exited before startup (${exit.code ?? exit.signal}): ${output}`);
+    }
   }
   expect(output).toContain('Scan worker started with concurrency 3');
   child.kill('SIGINT');
@@ -116,7 +129,9 @@ describe.sequential('compiled process startup', () => {
       });
       child.kill('SIGTERM');
     })));
-    for (const directory of fixtures.splice(0)) rmSync(directory, { recursive: true, force: true });
+    for (const directory of fixtures.splice(0)) {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('emits the production entry point without legacy or test artifacts', () => {

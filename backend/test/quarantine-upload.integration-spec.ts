@@ -63,10 +63,14 @@ describe('Quarantine promotion against isolated Floci', () => {
     await ensureBucket(s3Bucket);
     await ensureBucket(quarantineBucket);
     await s3.send(new CreateBucketCommand({ Bucket: s3Bucket })).catch((error: unknown) => {
-      if (!isAlreadyExists(error)) throw error;
+      if (!isAlreadyExists(error)) {
+        throw error;
+      }
     });
     await s3.send(new CreateBucketCommand({ Bucket: quarantineBucket })).catch((error: unknown) => {
-      if (!isAlreadyExists(error)) throw error;
+      if (!isAlreadyExists(error)) {
+        throw error;
+      }
     });
     await testQueueSetup(`${queuePrefix}-main`, `${queuePrefix}-dlq`, 5);
     await retryQueueSetup(`${queuePrefix}-retry`, `${queuePrefix}-retry-dlq`);
@@ -79,11 +83,17 @@ describe('Quarantine promotion against isolated Floci', () => {
   afterAll(async () => {
     await app?.close();
     for (const pair of [testQueue, retryQueue]) {
-      if (!pair) continue;
+      if (!pair) {
+        continue;
+      }
+
       await sqs.send(new DeleteQueueCommand({ QueueUrl: pair.queueUrl })).catch(() => undefined);
       await sqs.send(new DeleteQueueCommand({ QueueUrl: pair.dlqUrl })).catch(() => undefined);
     }
-    for (const key of uploadedKeys) await deleteUploadArtifacts(key).catch(() => undefined);
+    for (const key of uploadedKeys) {
+      await deleteUploadArtifacts(key).catch(() => undefined);
+    }
+
     s3.destroy();
     sqs.destroy();
   });
@@ -172,7 +182,9 @@ describe('Quarantine promotion against isolated Floci', () => {
 
 async function ensureBucket(bucket: string): Promise<void> {
   await s3.send(new HeadBucketCommand({ Bucket: bucket })).catch((error: unknown) => {
-    if (!isNotFound(error)) throw error;
+    if (!isNotFound(error)) {
+      throw error;
+    }
   });
 }
 
@@ -221,7 +233,10 @@ async function signedUpload(filename: string, content: string): Promise<string> 
   const key = authorization.body.fields.key as string;
   uploadedKeys.push(key);
   const body = new FormData();
-  for (const [name, value] of Object.entries(authorization.body.fields as Record<string, string>)) body.append(name, value);
+  for (const [name, value] of Object.entries(authorization.body.fields as Record<string, string>)) {
+    body.append(name, value);
+  }
+
   body.append('file', new Blob([content], { type: 'application/pdf' }), filename);
   const response = await fetch(authorization.body.url as string, { method: 'POST', body });
   expect(response.status).toBe(204);
@@ -258,7 +273,10 @@ async function withWorker(queueUrl: string, assertion: () => Promise<void>): Pro
 async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 12_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await predicate()) return;
+    if (await predicate()) {
+      return;
+    }
+
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`Condition did not become true within ${timeoutMs}ms`);
@@ -295,7 +313,10 @@ async function promotedBody(key: string, versionId: string): Promise<string | un
     const response = await s3.send(new GetObjectCommand({ Bucket: s3Bucket, Key: cleanKey(key, versionId) }));
     return await response.Body?.transformToString();
   } catch (error) {
-    if (isNotFound(error)) return undefined;
+    if (isNotFound(error)) {
+      return undefined;
+    }
+
     throw error;
   }
 }
@@ -346,5 +367,7 @@ async function deleteUploadArtifacts(key: string): Promise<void> {
     ...(cleanVersions.Versions ?? []).map((version) => version.Key).filter((value): value is string => Boolean(value)),
     ...(cleanVersions.DeleteMarkers ?? []).map((version) => version.Key).filter((value): value is string => Boolean(value)),
   ]);
-  for (const cleanKey of keys) await deleteVersions(s3Bucket, cleanKey);
+  for (const cleanKey of keys) {
+    await deleteVersions(s3Bucket, cleanKey);
+  }
 }

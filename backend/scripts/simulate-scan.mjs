@@ -18,14 +18,24 @@ function usage() {
 function parseArgs(args) {
   const [key, ...tail] = args;
   let outcome = 'clean';
-  if (tail[0] && !tail[0].startsWith('--')) outcome = tail.shift();
-  if (!key || !Object.hasOwn(outcomes, outcome)) throw new Error(usage());
+  if (tail[0] && !tail[0].startsWith('--')) {
+    outcome = tail.shift();
+  }
+
+  if (!key || !Object.hasOwn(outcomes, outcome)) {
+    throw new Error(usage());
+  }
+
   let versionId;
   for (let index = 0; index < tail.length; index += 1) {
-    if (tail[index] !== '--version-id' || !tail[index + 1] || versionId) throw new Error(usage());
+    if (tail[index] !== '--version-id' || !tail[index + 1] || versionId) {
+      throw new Error(usage());
+    }
+
     versionId = tail[index + 1];
     index += 1;
   }
+
   return { key, outcome, versionId };
 }
 
@@ -33,7 +43,10 @@ loadBackendEnv();
 const { key, outcome, versionId: requestedVersionId } = parseArgs(process.argv.slice(2));
 const bucketName = process.env.S3_QUARANTINE_BUCKET;
 const queueUrl = process.env.SQS_QUEUE_URL;
-if (!bucketName || !queueUrl) throw new Error('S3_QUARANTINE_BUCKET and SQS_QUEUE_URL are required');
+if (!bucketName || !queueUrl) {
+  throw new Error('S3_QUARANTINE_BUCKET and SQS_QUEUE_URL are required');
+}
+
 const region = process.env.AWS_DEFAULT_REGION ?? 'us-east-1';
 const credentials = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
   ? { accessKeyId: process.env.AWS_ACCESS_KEY_ID, secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY }
@@ -59,7 +72,11 @@ try {
   if (!exactVersionId || exactVersionId.toLowerCase() === 'null') {
     throw new Error('The quarantine object has no non-null version ID; enable bucket versioning first');
   }
-  if (!head.ETag) throw new Error('The quarantine object does not have an ETag');
+
+  if (!head.ETag) {
+    throw new Error('The quarantine object does not have an ETag');
+  }
+
   const [scanStatus, scanResultStatus] = outcomes[outcome];
   const account = process.env.AWS_ACCOUNT_ID ?? '000000000000';
   const event = {
