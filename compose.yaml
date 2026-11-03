@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:18
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-doc_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-doc_ai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-doc-ai-local-password}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
   floci:
     image: floci/floci:2.3.0-compat
     ports:
@@ -22,3 +38,4 @@ services:
 
 volumes:
   floci-data:
+  postgres-data:

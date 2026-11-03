@@ -19,6 +19,17 @@ The API listens on port 3000 by default. Copy `.env.example` to `.env` to use
 local Floci credentials and the quarantine bucket. Both `dev` and `start` load
 this file when present; an existing shell environment variable takes precedence.
 
+Start local PostgreSQL and Floci from the repository root, then apply the
+versioned PostgreSQL migrations from `backend/`:
+
+```sh
+docker compose --project-name doc-ai-node up -d --wait postgres floci
+npm run migrate
+```
+
+PostgreSQL uses the persistent `postgres-data` volume. The migration command
+loads `backend/.env` and requires `DATABASE_URL` to point to the local database.
+
 Development uses the Nest CLI compiler in watch mode. It recompiles and restarts
 when source changes. `build` clears and compiles production output to `dist/`;
 `start` runs `dist/main.js`.
