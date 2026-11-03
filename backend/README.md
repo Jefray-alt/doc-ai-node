@@ -74,6 +74,16 @@ and file size. It returns a short-lived presigned POST for a generated key in
 does not receive the file bytes. A successful storage response means the PDF is
 awaiting validation and does not make it available for chat.
 
+After the browser's S3 POST succeeds, call `POST /uploads/:uploadId/complete`.
+The API checks the generated `incoming/:uploadId.pdf` object and records its
+actual ETag and byte length with a queued job and outbox row. Repeating this
+request returns the existing job. `GET /uploads/:uploadId/status` returns the
+job's public status, update time, and safe failure message when present. The
+publisher is exposed as `OutboxPublisherService.dispatchOnce()` for a worker to
+call; it sends only the upload ID and payload version to the configured SQS
+queue. Configure `SQS_QUEUE_URL` when registering the publisher module. The API
+does not start a publisher loop.
+
 ## Backend conventions
 
 `src/main.ts` loads the optional backend `.env` file and starts `AppModule`.

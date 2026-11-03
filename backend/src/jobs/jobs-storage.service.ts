@@ -17,6 +17,13 @@ interface JobRow extends QueryResultRow {
   owner_token: string | null;
 }
 
+export class JobObjectConflictError extends Error {
+  constructor(uploadId: string) {
+    super(`Upload ${uploadId} already has a different immutable object reference`);
+    this.name = 'JobObjectConflictError';
+  }
+}
+
 @Injectable()
 export class JobsStorageService implements OnModuleDestroy {
   constructor(@Inject(Pool) private readonly pool: Pool) {}
@@ -42,7 +49,7 @@ export class JobsStorageService implements OnModuleDestroy {
         const existing = await client.query<JobRow>('SELECT * FROM upload_jobs WHERE upload_id = $1 FOR UPDATE', [input.uploadId]);
         row = existing.rows[0];
         if (!row || !sameObject(row, input)) {
-          throw new Error(`Upload ${input.uploadId} already has a different immutable object reference`);
+          throw new JobObjectConflictError(input.uploadId);
         }
       } else {
         await client.query(

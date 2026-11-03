@@ -11,7 +11,7 @@
     "lint": "oxlint",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.config.e2e.ts",
-    "test:floci": "npm run build && vitest run --config vitest.config.floci.ts",
+    "test:floci": "node --env-file-if-exists=.env -e \"const databaseUrl = process.env.TEST_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim(); if (!databaseUrl) { console.error('test:floci requires a non-empty TEST_DATABASE_URL or DATABASE_URL'); process.exit(1); }\" && npm run build && node --env-file-if-exists=.env ./node_modules/vitest/vitest.mjs run --config vitest.config.floci.ts",
     "migrate": "npm run build && node --env-file-if-exists=.env dist/jobs/migrate.js"
   },
   "engines": {
@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1157.0",
+    "@aws-sdk/client-sqs": "^3.1161.0",
     "@aws-sdk/s3-presigned-post": "^3.1157.0",
     "@nestjs/common": "^11.2.8",
     "@nestjs/core": "^11.2.8",

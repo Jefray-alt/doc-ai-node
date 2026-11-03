@@ -8,8 +8,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { JobsStorageService } from '../src/jobs/jobs-storage.service.js';
 import { runMigrations } from '../src/jobs/migrations.js';
 
-const databaseUrl = process.env.TEST_DATABASE_URL;
-const integration = databaseUrl ? describe : describe.skip;
+const databaseUrl = process.env.TEST_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim();
+if (!databaseUrl) throw new Error('Floci integration tests require a non-empty TEST_DATABASE_URL or DATABASE_URL');
+const integration = describe;
 
 integration('PostgreSQL jobs storage', () => {
   const schemaName = `jobs_test_${randomUUID().replaceAll('-', '')}`;
