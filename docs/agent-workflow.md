@@ -39,6 +39,14 @@ Conventional Commit. Keep the plan lightweight and focused on the requested
 work; do not add product scope or detail future tasks beyond what is needed to
 show dependencies and sequence.
 
+Each implementation plan must focus on one specific outcome. During planning,
+use a rough judgment of total added and deleted lines across all its tasks,
+including code, tests, and documentation. If the plan looks likely to exceed
+1,000 changed lines, ask the user to agree on a smaller scope and wait for their
+response before implementation. This is a planning guardrail, not a hard
+implementation limit. Assess the whole plan, even when divided into tasks or
+commits, and defer unrelated changes to separate plans.
+
 Substantive change requests must be divided into multiple cohesive, independently
 reviewable tasks. Use a single task only when the work is genuinely small and
 indivisible, and state the specific reason in the plan. Do not split work by

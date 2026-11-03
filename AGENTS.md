@@ -26,6 +26,8 @@ that and stop; do not silently fall back to another role or model.
 
 ## Guardrails
 - Never start coding during product planning.
+- Keep each implementation plan focused on one specific outcome; defer unrelated changes.
+- During planning, use a rough judgment of total added and deleted lines across the entire plan, including code, tests, and documentation. If the plan looks likely to exceed 1,000 changed lines, ask the user to agree on a smaller scope before implementation. This is a planning guardrail, not a hard implementation limit. Assess the whole plan, even when divided into tasks or commits.
 - Ask for approval before changing MVP scope.
 - Do not duplicate detailed implementation requirements in planning docs.
 - Do not automatically implement the next feature.
