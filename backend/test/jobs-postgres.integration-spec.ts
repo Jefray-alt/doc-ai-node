@@ -56,6 +56,26 @@ describe('PostgreSQL upload jobs', () => {
       status: 'awaiting_upload',
     });
 
+    const laterId = randomUUID();
+    await repository.create({
+      uploadId: laterId,
+      bucket: 'integration-quarantine',
+      objectKey: `integration/${laterId}.pdf`,
+      status: 'awaiting_upload',
+      uploadExpiresAt: new Date(Date.now() + 60_000),
+      nextCheckAt: new Date(Date.now() - 1_000),
+    });
+    const due = await repository.findDueAwaitingUploads(25, new Date());
+    expect(due.findIndex((job) => job.uploadId === laterId))
+      .toBeLessThan(due.findIndex((job) => job.uploadId === uploadId));
+
+    expect(await repository.retryUploadCheck(uploadId, new Date(Date.now() + 5_000))).toBe(true);
+    expect(await repository.confirmUpload(uploadId)).toBe(true);
+    expect(await repository.retryUploadCheck(uploadId, new Date())).toBe(false);
+    expect(await repository.expireMissingUpload(uploadId)).toBe(false);
+    expect(await repository.confirmUpload(uploadId)).toBe(false);
+    await expect(repository.findByUploadId(uploadId)).resolves.toMatchObject({ status: 'pending_dispatch' });
+
     await expect(
       adminPool.query(
         `INSERT INTO jobs

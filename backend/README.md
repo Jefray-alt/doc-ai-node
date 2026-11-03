@@ -58,7 +58,9 @@ npm start
 `npm test` runs all discovered unit and e2e suites. `npm run test:e2e` runs the
 HTTP and process-level suites under `test/`.
 `npm run test:floci` exercises the signed quarantine POST against the local
-Floci service and verifies the uploaded object is absent from the ingestion bucket.
+Floci service, then verifies the API reconciles the uploaded object into
+`pending_dispatch` while a presigned upload with no object stays in
+`awaiting_upload`.
 
 ## Health endpoint
 
@@ -85,6 +87,17 @@ The browser sends the file directly to Floci; the API does not receive the file
 bytes. A successful storage response means the PDF is awaiting validation and
 does not make it available for chat. PostgreSQL and the initial migration must
 be available for this endpoint to issue an authorization.
+
+The API's in-process reconciler checks due `awaiting_upload` rows every five
+seconds, in batches of at most 25, using sequential S3 HEAD requests with a
+five-second request timeout. A present object moves to `pending_dispatch`.
+Missing objects remain `awaiting_upload` through the ten-minute grace period
+after the upload authorization expires; a final missing-object check after that
+period moves the row to `expired`. Other S3 errors are retried and do not expire
+the upload. These states are retained in PostgreSQL for inspection; this does
+not yet dispatch work to a validation worker or delete quarantine objects. Each
+cycle reads due rows from PostgreSQL, so pending checks resume after an API
+restart.
 
 The default HTTP tests replace the jobs repository and need no running services.
 `npm run test:floci` runs only the real quarantine POST flow against the API and

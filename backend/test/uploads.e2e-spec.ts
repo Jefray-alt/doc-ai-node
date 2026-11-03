@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Logger, type INestApplication } from '@nestjs/common';
 import { AppModule } from '../src/app.module.js';
 import { JobsRepository } from '../src/jobs/jobs.repository.js';
+import { JobsReconciler } from '../src/jobs/jobs.reconciler.js';
 
 process.env.AWS_ACCESS_KEY_ID = 'test';
 process.env.AWS_SECRET_ACCESS_KEY = 'test';
@@ -19,6 +20,8 @@ describe('PDF upload authorization', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(JobsRepository)
       .useValue(jobs)
+      .overrideProvider(JobsReconciler)
+      .useValue({})
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();

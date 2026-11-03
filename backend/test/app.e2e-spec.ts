@@ -3,12 +3,16 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
 import { AppModule } from '../src/app.module.js';
+import { JobsReconciler } from '../src/jobs/jobs.reconciler.js';
 
 describe('AppModule HTTP API', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(JobsReconciler)
+      .useValue({})
+      .compile();
     app = moduleRef.createNestApplication();
     await app.init();
   });

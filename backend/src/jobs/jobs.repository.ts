@@ -77,4 +77,46 @@ export class JobsRepository {
 
     return row ? toJobRecord(row) : null;
   }
+
+  async findDueAwaitingUploads(limit: number, now: Date): Promise<JobRecord[]> {
+    const result = await this.pool.query<JobRow>(
+      `SELECT * FROM jobs
+       WHERE status = 'awaiting_upload' AND next_check_at <= $1
+       ORDER BY next_check_at, created_at
+       LIMIT $2`,
+      [now, limit],
+    );
+
+    return result.rows.map(toJobRecord);
+  }
+
+  async confirmUpload(uploadId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE jobs SET status = 'pending_dispatch', updated_at = now()
+       WHERE upload_id = $1 AND status = 'awaiting_upload'`,
+      [uploadId],
+    );
+
+    return result.rowCount === 1;
+  }
+
+  async retryUploadCheck(uploadId: string, nextCheckAt: Date): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE jobs SET next_check_at = $2, updated_at = now()
+       WHERE upload_id = $1 AND status = 'awaiting_upload'`,
+      [uploadId, nextCheckAt],
+    );
+
+    return result.rowCount === 1;
+  }
+
+  async expireMissingUpload(uploadId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE jobs SET status = 'expired', updated_at = now()
+       WHERE upload_id = $1 AND status = 'awaiting_upload'`,
+      [uploadId],
+    );
+
+    return result.rowCount === 1;
+  }
 }

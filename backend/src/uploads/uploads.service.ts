@@ -15,24 +15,12 @@ const UPLOAD_EXPIRY_SECONDS = 5 * 60;
 
 @Injectable()
 export class UploadsService {
-  private readonly s3: S3Client;
   private readonly logger = new Logger(UploadsService.name);
 
-  constructor(private readonly jobs: JobsRepository) {
-    const endpoint = process.env.S3_ENDPOINT_URL;
-    this.s3 = new S3Client({
-      region: process.env.AWS_DEFAULT_REGION ?? 'us-east-1',
-      ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
-      ...(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
-        ? {
-            credentials: {
-              accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-              secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-            },
-          }
-        : {}),
-    });
-  }
+  constructor(
+    private readonly jobs: JobsRepository,
+    private readonly s3: S3Client,
+  ) {}
 
   async createPresignedUpload(_input: PresignUploadRequest): Promise<PresignedUploadResponse> {
     const uploadId = randomUUID();

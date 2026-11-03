@@ -146,8 +146,8 @@ docker compose --project-name doc-ai-node up -d --wait floci postgres
 
 PostgreSQL 17 stores upload job state in a persistent Compose volume. Local
 credentials and the database name are in the root `.env.example`; the backend
-connection string is in `backend/.env.example`. The API does not connect to the
-database during startup, so `/health` remains available when PostgreSQL is not
-running. The root launcher waits for PostgreSQL and runs repeat-safe migrations
+connection string is in `backend/.env.example`. The API retries upload
+reconciliation if PostgreSQL is unavailable, while `/health` remains available.
+The root launcher waits for PostgreSQL and runs repeat-safe migrations
 before starting development servers. To apply migrations manually, run
 `npm run db:migrate` from `backend/`.
