@@ -23,6 +23,22 @@ Development uses the Nest CLI compiler in watch mode. It recompiles and restarts
 when source changes. `build` clears and compiles production output to `dist/`;
 `start` runs `dist/main.js`.
 
+## PostgreSQL jobs
+
+The root Compose project runs PostgreSQL 17 on `127.0.0.1:5432` with data in a
+persistent named volume. Set `DATABASE_URL` in this directory's optional `.env`
+to override the example connection string. Shell environment variables take
+precedence. Apply versioned SQL migrations with:
+
+```sh
+npm run db:migrate
+```
+
+The migration command builds the backend, applies pending migrations in one
+transaction, and records their versions in `schema_migrations`. Running it
+again is safe. Do not remove the Compose volume when stopping local services if
+you need to retain job records.
+
 Run checks and tests separately:
 
 ```sh
