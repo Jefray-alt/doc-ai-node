@@ -2,11 +2,12 @@ import { Button, Group, Modal, Text } from '@mantine/core'
 import { useCallback, useLayoutEffect, useRef } from 'react'
 import type { ChangeEvent } from 'react'
 import type { PdfUploadDialogProps } from './PdfUploadDialog.types'
+import type { UploadJobState } from './UploadJob.types'
 import { usePdfUpload } from './usePdfUpload'
 import classes from './PdfUploadDialog.module.css'
 
 export function PdfUploadDialog({ opened, onClose, onUploadSuccess }: PdfUploadDialogProps) {
-  const { file, status, errorMessage, selectFile, uploadFile, resetSession } = usePdfUpload(onUploadSuccess)
+  const { file, jobStatus, status, errorMessage, selectFile, uploadFile, resetSession } = usePdfUpload(onUploadSuccess)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const resetForClose = useCallback(() => {
@@ -41,13 +42,16 @@ export function PdfUploadDialog({ opened, onClose, onUploadSuccess }: PdfUploadD
       closeButtonProps={{ 'aria-label': 'Close PDF upload' }}
     >
       <div className={classes.content}>
-        {status === 'success' ? (
+        {status === 'complete' ? (
           <div className={classes.success} role="status">
             <svg className={classes.successIcon} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
               <path d="m5 12 4 4L19 6" />
             </svg>
             <div className={classes.fileDetails}>
-              <Text fw={600}>Uploaded, awaiting validation</Text>
+              <Text fw={600}>{jobStatus ? statusCopy(jobStatus.status) : 'Confirmation received'}</Text>
+              {jobStatus?.status === 'failed' && jobStatus.error && (
+                <Text size="sm" c="red.8" role="alert">{jobStatus.error}</Text>
+              )}
               <Text size="sm" c="dimmed" className={classes.fileName}>{file?.name}</Text>
             </div>
           </div>
@@ -59,7 +63,6 @@ export function PdfUploadDialog({ opened, onClose, onUploadSuccess }: PdfUploadD
             <div
               className={classes.filePicker}
               data-selected={Boolean(file) || undefined}
-              data-disabled={status === 'uploading' || undefined}
               data-error={Boolean(errorMessage) || undefined}
             >
               <input
@@ -72,7 +75,6 @@ export function PdfUploadDialog({ opened, onClose, onUploadSuccess }: PdfUploadD
                 aria-invalid={Boolean(errorMessage)}
                 accept=".pdf,application/pdf"
                 onChange={handleFileChange}
-                disabled={status === 'uploading'}
               />
               <svg className={classes.documentIcon} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" />
@@ -101,20 +103,30 @@ export function PdfUploadDialog({ opened, onClose, onUploadSuccess }: PdfUploadD
       </div>
       <Group justify="flex-end" gap="sm" className={classes.footer}>
         <Button variant="default" onClick={handleClose}>
-          {status === 'success' ? 'Done' : 'Close'}
+          {status === 'complete' ? 'Done' : 'Close'}
         </Button>
-        {status !== 'success' && (
+        {status !== 'complete' && (
           <Button
             onClick={() => void uploadFile()}
-            disabled={!file || status === 'uploading'}
-            loading={status === 'uploading'}
+            disabled={!file || status === 'uploading' || status === 'confirming'}
+            loading={status === 'uploading' || status === 'confirming'}
           >
-            {status === 'uploading'
-              ? 'Uploading PDF'
-              : status === 'error' ? 'Retry upload' : 'Upload PDF'}
+            {status === 'uploading' ? 'Uploading PDF'
+              : status === 'confirming' ? 'Confirming upload'
+                : status === 'confirmation_error' ? 'Retry confirmation'
+                  : status === 'upload_error' ? 'Retry upload' : 'Upload PDF'}
           </Button>
         )}
       </Group>
     </Modal>
   )
+}
+
+function statusCopy(status: UploadJobState) {
+  switch (status) {
+    case 'queued': return 'Queued for document checks'
+    case 'processing': return 'Document checks are in progress'
+    case 'source_checked': return 'Upload checked; document preparation pending.'
+    case 'failed': return 'Document checks could not be completed'
+  }
 }
