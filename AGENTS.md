@@ -33,6 +33,9 @@ that and stop; do not silently fall back to another role or model.
 - Do not automatically implement the next feature.
 - Keep documentation lightweight for solo projects.
 
+## Code Readability
+- Write code for readability. Use blank lines to separate distinct logical blocks, and preserve meaningful spacing when editing existing code.
+
 ## UI Development
 - When you need information about Mantine UI components, start with https://mantine.dev/llms.txt and follow the relevant documentation links.
 - Group each component with its styles, types, and related hooks in its own folder under `frontend/src/components/`.
