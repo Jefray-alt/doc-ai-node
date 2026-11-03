@@ -8,11 +8,11 @@ This is a lightweight, outcome-oriented roadmap for a solo learning project. It 
 
 **Feature:** Single-PDF grounded chat with cited pages and source excerpts.
 
-**Status:** MVP in progress. Frontend foundation and backlog feature 1, **Create the chat workspace**, are complete in `frontend/` using React, TypeScript, Vite, and Mantine. The workspace includes a conversation area, message composer, and an Add PDF entry point. Messages and upload status exist only in memory and clear on refresh. Document processing, generated answers, and evidence remain unimplemented.
+**Status:** MVP in progress. Frontend foundation and backlog feature 1, **Create the chat workspace**, are complete in `frontend/` using React, TypeScript, Vite, and Mantine. The workspace includes a conversation area, disabled message composer, and an Add PDF entry point. Upload status exists only in memory and clears on refresh. Document preparation, generated answers, and evidence remain unimplemented.
 
-**Backend progress:** Backlog feature 2 now includes PDF authorization and direct upload into local quarantine storage. Session handling, PDF validation and processing, promotion to the ingestion bucket, and chat readiness remain pending. See [backend/README.md](../backend/README.md) for backend conventions.
+**Backend progress:** Backlog feature 2 includes direct PDF upload, explicit upload confirmation, a durable queued job/outbox, and a separate worker that checks the source object's ETag and byte count. The UI reports job status while document preparation remains pending. Session handling, PDF parsing, generated answers, and chat readiness remain pending. The worker does not copy or promote the file. See [backend/README.md](../backend/README.md) for backend conventions.
 
-**Local storage:** Persistent local Floci storage provides separate ingestion and quarantine buckets for feature 2. See [README local storage instructions](../README.md#local-s3-storage). Feature 2 remains in progress.
+**Local storage:** Persistent local Floci storage provides the configured upload bucket plus a legacy ingestion bucket. Uploads stay in the source bucket; no promotion step runs. See [README local storage instructions](../README.md#local-s3-storage). Feature 2 remains in progress.
 
 **Validation:** Colocated frontend unit tests isolate each component and hook, mocking nested app components. Coverage includes chat message rendering, workspace state and wiring, composer submission and keyboard/IME guards, conversation rendering and scrolling, and PDF upload behavior. Run them with `npm test` from `frontend/`, or use `npm run test:watch` during development. Type checking and linting pass. Existing browser checks cover message submission, multiline and IME input, blank-message rejection, scrolling, PDF upload dialog and focus, refresh reset, and mobile layouts at 320px and 390px.
 

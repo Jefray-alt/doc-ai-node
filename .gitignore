@@ -3,4 +3,5 @@
 .agents/skills/*
 .worktrees/
 /node_modules/
+/backend/dist-worker/
 /.env

@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from '../../test/render'
@@ -55,5 +55,20 @@ describe('MessageComposer', () => {
 
     await user.keyboard('{Enter}')
     expect(onSend).toHaveBeenCalledExactlyOnceWith('First line\nSecond line')
+  })
+
+  it('blocks click and form submission while disabled', async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    render(<MessageComposer onSend={onSend} disabled />)
+    const input = screen.getByRole('textbox', { name: 'Message' })
+    const send = screen.getByRole('button', { name: 'Send message' })
+
+    expect(screen.getByText('Document preparation is not available yet.')).toBeInTheDocument()
+    expect(input).toBeDisabled()
+    expect(send).toBeDisabled()
+    fireEvent.submit(screen.getByRole('form', { name: 'Message composer' }))
+    await user.click(send)
+    expect(onSend).not.toHaveBeenCalled()
   })
 })

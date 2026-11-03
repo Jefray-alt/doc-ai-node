@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render } from '../../test/render'
 import { PdfUploadDialog } from './PdfUploadDialog'
+import type { UploadedPdf } from './UploadJob.types'
 
 const file = new File(['%PDF-1.7 sample'], 'report.pdf', { type: 'application/pdf' })
 const invalidFile = new File(['text'], 'notes.txt', { type: 'text/plain' })
@@ -19,7 +20,11 @@ function presignResponse() {
 
 afterEach(() => vi.unstubAllGlobals())
 
-function ControlledDialog({ onUploadSuccess }: { onUploadSuccess?: (fileName: string) => void }) {
+function queuedStatus() {
+  return { uploadId: 'upload-123', status: 'queued' as const, updatedAt: '2026-01-01T00:00:00.000Z', error: null }
+}
+
+function ControlledDialog({ onUploadSuccess }: { onUploadSuccess?: (upload: UploadedPdf) => void }) {
   const [opened, setOpened] = useState(true)
 
   return (
@@ -49,13 +54,14 @@ describe('PdfUploadDialog', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
       .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true, json: async () => queuedStatus() })
     vi.stubGlobal('fetch', fetchMock)
     render(<PdfUploadDialog opened onClose={vi.fn()} />)
 
     await user.upload(screen.getByLabelText('Choose a PDF'), file)
     await user.click(screen.getByRole('button', { name: 'Upload PDF' }))
 
-    expect(await screen.findByText('Uploaded, awaiting validation')).toBeInTheDocument()
+    expect(await screen.findByText('Queued for document checks')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/uploads/presign', expect.objectContaining({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -70,6 +76,94 @@ describe('PdfUploadDialog', () => {
     expect(uploadedFile.name).toBe(file.name)
     expect(uploadedFile.type).toBe(file.type)
     expect(await uploadedFile.text()).toBe(await file.text())
+  })
+
+  it('confirms a successful storage upload and reports the queued job snapshot', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true, json: async () => queuedStatus() })
+    vi.stubGlobal('fetch', fetchMock)
+    const onUploadSuccess = vi.fn()
+    render(<PdfUploadDialog opened onClose={vi.fn()} onUploadSuccess={onUploadSuccess} />)
+
+    await user.upload(screen.getByLabelText('Choose a PDF'), file)
+    await user.click(screen.getByRole('button', { name: 'Upload PDF' }))
+
+    expect(await screen.findByText('Queued for document checks')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/uploads/upload-123/complete', expect.objectContaining({ method: 'POST', signal: expect.any(AbortSignal) }))
+    expect(onUploadSuccess).toHaveBeenCalledExactlyOnceWith({
+      fileName: 'report.pdf', uploadId: 'upload-123',
+      status: { uploadId: 'upload-123', status: 'queued', updatedAt: '2026-01-01T00:00:00.000Z', error: null },
+    })
+  })
+
+  it.each([
+    ['processing', 'Document checks are in progress'],
+    ['source_checked', 'Upload checked; document preparation pending.'],
+    ['failed', 'Document checks could not be completed'],
+  ] as const)('shows the %s status copy after confirmation', async (status, copy) => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({
+        ...queuedStatus(), status, error: status === 'failed' ? 'safe failure' : null,
+      }) }))
+    render(<PdfUploadDialog opened onClose={vi.fn()} />)
+
+    await user.upload(screen.getByLabelText('Choose a PDF'), file)
+    await user.click(screen.getByRole('button', { name: 'Upload PDF' }))
+
+    expect(await screen.findByText(copy)).toBeInTheDocument()
+    if (status === 'failed') expect(screen.getByRole('alert')).toHaveTextContent('safe failure')
+  })
+
+  it('retries confirmation without requesting permission or uploading the file again', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: true, json: async () => queuedStatus() })
+    vi.stubGlobal('fetch', fetchMock)
+    const onUploadSuccess = vi.fn()
+    render(<PdfUploadDialog opened onClose={vi.fn()} onUploadSuccess={onUploadSuccess} />)
+
+    await user.upload(screen.getByLabelText('Choose a PDF'), file)
+    await user.click(screen.getByRole('button', { name: 'Upload PDF' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Upload succeeded, but confirmation failed')
+    expect(screen.getByRole('button', { name: 'Retry confirmation' })).toBeEnabled()
+    expect(screen.getByText('report.pdf')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Retry confirmation' }))
+
+    expect(await screen.findByText('Queued for document checks')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/uploads/presign', 'http://localhost:4566/doc-ai-local-quarantine',
+      '/api/uploads/upload-123/complete', '/api/uploads/upload-123/complete',
+    ])
+    expect(onUploadSuccess).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps storage retry errors labeled as upload failures when new authorization fails', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: false })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<PdfUploadDialog opened onClose={vi.fn()} />)
+
+    await user.upload(screen.getByLabelText('Choose a PDF'), file)
+    await user.click(screen.getByRole('button', { name: 'Upload PDF' }))
+    await user.click(await screen.findByRole('button', { name: 'Retry upload' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Upload failed. Please try again.')
+    expect(screen.getByRole('button', { name: 'Retry upload' })).toBeEnabled()
+    expect(screen.queryByText(/confirmation failed/i)).not.toBeInTheDocument()
   })
 
   it('clears a selected file when the dialog closes and reopens', async () => {
@@ -140,16 +234,17 @@ describe('PdfUploadDialog', () => {
     const user = userEvent.setup()
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
-      .mockResolvedValueOnce({ ok: true }))
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true, json: async () => queuedStatus() }))
     render(<ControlledDialog />)
 
     await user.upload(screen.getByLabelText('Choose a PDF'), file)
     await user.click(screen.getByRole('button', { name: 'Upload PDF' }))
-    expect(await screen.findByText('Uploaded, awaiting validation')).toBeInTheDocument()
+    expect(await screen.findByText('Queued for document checks')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Done' }))
     await user.click(screen.getByRole('button', { name: 'Reopen dialog' }))
 
-    expect(screen.queryByText('Uploaded, awaiting validation')).not.toBeInTheDocument()
+    expect(screen.queryByText('Queued for document checks')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Upload PDF' })).toBeDisabled()
   })
 
@@ -177,6 +272,7 @@ describe('PdfUploadDialog', () => {
       .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectAuthorization = reject }))
       .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
       .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true, json: async () => queuedStatus() })
     vi.stubGlobal('fetch', fetchMock)
     const onUploadSuccess = vi.fn()
     render(<ControlledDialog onUploadSuccess={onUploadSuccess} />)
@@ -189,10 +285,10 @@ describe('PdfUploadDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Upload PDF' }))
     rejectAuthorization(new Error('late authorization failure'))
 
-    expect(await screen.findByText('Uploaded, awaiting validation')).toBeInTheDocument()
+    expect(await screen.findByText('Queued for document checks')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(onUploadSuccess).toHaveBeenCalledExactlyOnceWith('report.pdf')
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(onUploadSuccess).toHaveBeenCalledExactlyOnceWith({ fileName: 'report.pdf', uploadId: 'upload-123', status: queuedStatus() })
+    expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 
   it('does not publish a stale storage success after a new session succeeds', async () => {
@@ -203,6 +299,7 @@ describe('PdfUploadDialog', () => {
       .mockImplementationOnce(() => new Promise((resolve) => { resolveOldStorage = resolve }))
       .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
       .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true, json: async () => queuedStatus() })
     vi.stubGlobal('fetch', fetchMock)
     const onUploadSuccess = vi.fn()
     render(<ControlledDialog onUploadSuccess={onUploadSuccess} />)
@@ -214,13 +311,58 @@ describe('PdfUploadDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Reopen dialog' }))
     await user.upload(screen.getByLabelText('Choose a PDF'), file)
     await user.click(screen.getByRole('button', { name: 'Upload PDF' }))
-    expect(await screen.findByText('Uploaded, awaiting validation')).toBeInTheDocument()
-    expect(onUploadSuccess).toHaveBeenCalledExactlyOnceWith('report.pdf')
+    expect(await screen.findByText('Queued for document checks')).toBeInTheDocument()
+    expect(onUploadSuccess).toHaveBeenCalledExactlyOnceWith({ fileName: 'report.pdf', uploadId: 'upload-123', status: queuedStatus() })
 
     resolveOldStorage({ ok: true })
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
-    expect(onUploadSuccess).toHaveBeenCalledExactlyOnceWith('report.pdf')
-    expect(screen.getByText('Uploaded, awaiting validation')).toBeInTheDocument()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5))
+    expect(onUploadSuccess).toHaveBeenCalledExactlyOnceWith({ fileName: 'report.pdf', uploadId: 'upload-123', status: queuedStatus() })
+    expect(screen.getByText('Queued for document checks')).toBeInTheDocument()
+  })
+
+  it('invalidates an in-flight storage request when a different file is selected', async () => {
+    const user = userEvent.setup()
+    let resolveStorage!: (response: { ok: boolean }) => void
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveStorage = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onUploadSuccess = vi.fn()
+    render(<PdfUploadDialog opened onClose={vi.fn()} onUploadSuccess={onUploadSuccess} />)
+
+    await user.upload(screen.getByLabelText('Choose a PDF'), file)
+    await user.click(screen.getByRole('button', { name: 'Upload PDF' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const replacement = new File(['%PDF-1.7 replacement'], 'replacement.pdf', { type: 'application/pdf' })
+    await user.upload(screen.getByLabelText('Choose a PDF'), replacement)
+    resolveStorage({ ok: true })
+
+    await waitFor(() => expect(screen.getByText('replacement.pdf')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Upload PDF' })).toBeEnabled()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(onUploadSuccess).not.toHaveBeenCalled()
+  })
+
+  it('ignores a late confirmation response after replacing the file', async () => {
+    const user = userEvent.setup()
+    let resolveConfirmation!: (response: { ok: boolean; json: () => Promise<ReturnType<typeof queuedStatus>> }) => void
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
+      .mockResolvedValueOnce({ ok: true })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveConfirmation = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onUploadSuccess = vi.fn()
+    render(<PdfUploadDialog opened onClose={vi.fn()} onUploadSuccess={onUploadSuccess} />)
+
+    await user.upload(screen.getByLabelText('Choose a PDF'), file)
+    await user.click(screen.getByRole('button', { name: 'Upload PDF' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    await user.upload(screen.getByLabelText('Choose a PDF'), new File(['%PDF'], 'replacement.pdf', { type: 'application/pdf' }))
+    resolveConfirmation({ ok: true, json: async () => queuedStatus() })
+
+    await waitFor(() => expect(screen.getByText('replacement.pdf')).toBeInTheDocument())
+    expect(onUploadSuccess).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Upload PDF' })).toBeEnabled()
   })
 
   it('reports a specific error for a non-PDF selection before contacting the API', async () => {
@@ -301,6 +443,7 @@ describe('PdfUploadDialog', () => {
       .mockResolvedValueOnce({ ok: false, text: async () => 'storage error' })
       .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
       .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true, json: async () => queuedStatus() })
     vi.stubGlobal('fetch', fetchMock)
     render(<PdfUploadDialog opened onClose={vi.fn()} />)
 
@@ -309,8 +452,8 @@ describe('PdfUploadDialog', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Upload failed. Please try again.')
 
     await user.click(screen.getByRole('button', { name: 'Retry upload' }))
-    expect(await screen.findByText('Uploaded, awaiting validation')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(await screen.findByText('Queued for document checks')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
   it('disables submission while an upload is in progress', async () => {
@@ -319,6 +462,7 @@ describe('PdfUploadDialog', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
       .mockImplementationOnce(() => new Promise((resolve) => { resolveUpload = resolve }))
+      .mockResolvedValueOnce({ ok: true, json: async () => queuedStatus() })
     vi.stubGlobal('fetch', fetchMock)
     render(<PdfUploadDialog opened onClose={vi.fn()} />)
 
@@ -326,7 +470,7 @@ describe('PdfUploadDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Upload PDF' }))
     expect(screen.getByRole('button', { name: 'Uploading PDF' })).toBeDisabled()
     resolveUpload({ ok: true })
-    expect(await screen.findByText('Uploaded, awaiting validation')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(await screen.findByText('Queued for document checks')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 })

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useDisclosure } from '@mantine/hooks'
 import type { Message } from '../ChatMessage/ChatMessage.types'
+import type { UploadedPdf } from '../PdfUploadDialog/UploadJob.types'
 
 export function useChatWorkspace() {
   const [messages, setMessages] = useState<Message[]>([])
@@ -11,15 +12,19 @@ export function useChatWorkspace() {
     setMessages((current) => [...current, { id: current.length + 1, text }])
   }
 
-  function handlePdfUploaded(fileName: string) {
-    setUploadedPdfName(fileName)
+  function handlePdfUploaded(upload: UploadedPdf) {
+    setUploadedPdfName(upload.fileName)
+    setUploadedPdf(upload)
     closePdfInfo()
   }
+
+  const [uploadedPdf, setUploadedPdf] = useState<UploadedPdf | null>(null)
 
   return {
     messages,
     sendMessage,
     uploadedPdfName,
+    uploadedPdf,
     pdfInfoOpened,
     openPdfInfo,
     closePdfInfo,

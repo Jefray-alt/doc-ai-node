@@ -40,18 +40,23 @@ test -f .env || cp .env.example .env
 test -f backend/.env || cp backend/.env.example backend/.env
 ```
 
+These commands preserve existing files. If `backend/.env` predates the worker,
+compare it with `backend/.env.example` and add any missing SQS and worker
+settings while keeping local endpoint, credentials, and database values. The
+worker needs both `SQS_QUEUE_URL` and `SQS_DLQ_URL`.
+
 Start the complete development environment from the repository root:
 
 ```sh
 npm run dev
 ```
 
-The launcher starts Floci with Docker Compose and waits for its bucket health
-checks before starting Vite and the NestJS API. Both application logs are
-labeled in the terminal. Vite and Nest watch source files and reload as you
-edit; open the URL printed by Vite (normally `http://localhost:5173`). Press
-Ctrl+C to stop both application processes. Floci stays running and retains its
-data.
+The launcher starts PostgreSQL and Floci with Docker Compose, waits for their
+health checks, applies PostgreSQL migrations, and starts Vite, the NestJS API,
+and the independent document worker. Logs are labeled in the terminal. Open the
+URL printed by Vite (normally `http://localhost:5173`). Press Ctrl+C to stop
+Vite, the API, and the worker. PostgreSQL and Floci stay running and retain
+their data.
 
 To run one application alone, use the existing application scripts:
 
@@ -68,14 +73,18 @@ Run frontend npm commands from `frontend/`. `build` produces `frontend/dist/`;
 `preview` serves that production build locally. To pass arguments to Vite, use
 `npm run dev -- --host 0.0.0.0`.
 
-The chat workspace supports sending messages with the Send button or Enter.
-Use Shift + Enter for a new line. Messages stay in memory for the current tab and
-are cleared when you refresh or close it; there are no accounts or saved chats.
+The standalone message composer supports sending messages with the Send button
+or Enter and uses Shift + Enter for a new line. The workspace keeps its composer
+disabled until document preparation and chat are implemented. There are no
+accounts or saved chats.
 
-Use Add PDF to upload one PDF directly into the quarantine bucket. After upload,
-the workspace shows that the PDF is awaiting validation. The chat cannot use it
-until later processing and promotion steps are implemented. Upload status is
-held in memory and clears when you refresh the tab.
+Use Add PDF to upload one PDF directly to the configured Floci source bucket.
+After storage accepts the file, the browser confirms the upload with the API.
+The workspace shows the queued and processing state, then reports whether the
+worker checked the source object's ETag and byte count. That check does not
+parse or prepare the document, and chat remains unavailable. The worker reads
+the same `incoming/<uploadId>.pdf` object; it does not copy, promote, or delete
+it. Upload status is held in memory and clears when you refresh the tab.
 
 ### Backend
 
@@ -96,8 +105,16 @@ Run `npm test` for all TypeScript suites or `npm run test:e2e` for HTTP and
 process-level coverage. Backend modules, naming, and testing conventions are
 documented in [backend/README.md](backend/README.md).
 
-PDF validation, promotion from quarantine, document processing, and generated
-answers remain to be implemented.
+The upload dialog confirms the S3 POST with the API before showing a queued
+job. In the workspace, `queued` means the API recorded the durable job,
+`processing` means the worker is checking the uploaded object, `source_checked`
+means its ETag and byte count matched, and `failed` shows the safe failure
+message returned by the API. The UI polls queued and processing uploads every
+two seconds. A `source_checked` upload is not prepared for chat, so the message
+composer remains unavailable.
+
+PDF parsing, document preparation, generated answers, and evidence citations
+remain to be implemented.
 
 ### Local S3 storage
 
@@ -112,8 +129,10 @@ COMPOSE_PROJECT_NAME=doc-ai-node sh scripts/floci/smoke.sh
 ```
 
 Compose waits until both the ingestion bucket (`doc-ai-local-pdfs`) and
-quarantine bucket (`doc-ai-local-quarantine`) respond to S3 readiness checks.
-The quarantine bucket allows browser POST uploads from the local Vite origins.
+upload bucket (`doc-ai-local-quarantine`) respond to S3 readiness checks. The
+browser uploads directly to the configured upload bucket from the local Vite
+origin. The worker checks that same bucket and key in place; no promotion or
+file movement currently occurs.
 The smoke check uploads a temporary object to each bucket, compares downloaded
 bytes, and confirms deletion. It needs no AWS account or host AWS CLI.
 
@@ -127,6 +146,13 @@ keeping stored objects in the named Compose volume. The `doc-ai-node` project
 name also means a worktree shares that project's Floci data; when Compose
 configuration paths change between worktrees, it may safely recreate the
 container while retaining the named volume.
+
+If the API does not start, check `backend/.env` for a valid `DATABASE_URL` and
+inspect PostgreSQL and Floci with
+`docker compose --project-name doc-ai-node ps`. The root launcher applies
+migrations before starting the API or worker. If an upload stays queued,
+inspect the worker log in the `npm run dev` terminal and confirm the local SQS
+queue URLs in `backend/.env` match Floci's initialized queue names.
 
 To stop Floci while keeping the container and its data, run:
 
