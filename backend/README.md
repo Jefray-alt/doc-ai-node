@@ -39,6 +39,11 @@ transaction, and records their versions in `schema_migrations`. Running it
 again is safe. Do not remove the Compose volume when stopping local services if
 you need to retain job records.
 
+`npm run test:postgres` runs the migration and repository integration suite.
+Set `DATABASE_URL` to an empty disposable database with a fresh schema; the
+migration test expects to apply the initial migration itself. Do not point this
+suite at a shared or application database.
+
 Run checks and tests separately:
 
 ```sh
@@ -74,10 +79,25 @@ handling are still pending.
 ## Direct PDF uploads
 
 `POST /uploads/presign` accepts a PDF filename, `application/pdf` content type,
-and file size. It returns a short-lived presigned POST for a generated key in
-`doc-ai-local-quarantine`. The browser sends the file directly to Floci; the API
-does not receive the file bytes. A successful storage response means the PDF is
-awaiting validation and does not make it available for chat.
+and file size. It records an `awaiting_upload` job in PostgreSQL before returning
+a short-lived presigned POST for a generated key in `doc-ai-local-quarantine`.
+The browser sends the file directly to Floci; the API does not receive the file
+bytes. A successful storage response means the PDF is awaiting validation and
+does not make it available for chat. PostgreSQL and the initial migration must
+be available for this endpoint to issue an authorization.
+
+The default HTTP tests replace the jobs repository and need no running services.
+`npm run test:floci` runs only the real quarantine POST flow against the API and
+Floci; it requires PostgreSQL with migrations already applied. Start both
+Compose services and apply the migration first:
+
+```sh
+cd ..
+docker compose --project-name doc-ai-node up -d --wait floci postgres
+cd backend
+DATABASE_URL=postgresql://doc_ai:doc_ai_dev@127.0.0.1:5432/doc_ai npm run db:migrate
+DATABASE_URL=postgresql://doc_ai:doc_ai_dev@127.0.0.1:5432/doc_ai npm run test:floci
+```
 
 ## Backend conventions
 

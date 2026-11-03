@@ -4,6 +4,7 @@ import { InternalServerErrorException, Logger } from '@nestjs/common';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { UploadsService } from './uploads.service.js';
 import { MAX_UPLOAD_BYTES } from './uploads.constants.js';
+import type { JobRecord, JobsRepository } from '../jobs/jobs.repository.js';
 
 const { createClient, signPost } = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -29,6 +30,8 @@ const uploadId = '123e4567-e89b-42d3-a456-426614174000';
 const fixedNow = new Date('2026-01-02T03:04:05.000Z');
 
 describe('UploadsService', () => {
+  let jobs: Pick<JobsRepository, 'create'>;
+
   beforeEach(() => {
     vi.stubEnv('AWS_DEFAULT_REGION', undefined);
     vi.stubEnv('AWS_ACCESS_KEY_ID', undefined);
@@ -42,6 +45,7 @@ describe('UploadsService', () => {
     });
     vi.useFakeTimers();
     vi.setSystemTime(fixedNow);
+    jobs = { create: vi.fn().mockResolvedValue({}) };
   });
 
   afterEach(() => {
@@ -52,7 +56,7 @@ describe('UploadsService', () => {
   });
 
   it('creates a five-minute PDF POST policy for a generated quarantine key', async () => {
-    const service = new UploadsService();
+    const service = new UploadsService(jobs as JobsRepository);
     const response = await service.createPresignedUpload({
       filename: 'report.pdf',
       contentType: 'application/pdf',
@@ -64,6 +68,14 @@ describe('UploadsService', () => {
       url: 'https://storage.example.test/quarantine',
       fields: { key: `incoming/${uploadId}.pdf`, Policy: 'signed-policy' },
       expiresAt: '2026-01-02T03:09:05.000Z',
+    });
+    expect(jobs.create).toHaveBeenCalledWith({
+      uploadId,
+      bucket: 'doc-ai-local-quarantine',
+      objectKey: `incoming/${uploadId}.pdf`,
+      status: 'awaiting_upload',
+      uploadExpiresAt: new Date(response.expiresAt),
+      nextCheckAt: fixedNow,
     });
     expect(signPost).toHaveBeenCalledWith(expect.anything(), {
       Bucket: 'doc-ai-local-quarantine',
@@ -85,7 +97,7 @@ describe('UploadsService', () => {
     vi.stubEnv('S3_ENDPOINT_URL', 'http://localhost:4566');
     vi.stubEnv('S3_QUARANTINE_BUCKET', 'custom-quarantine');
 
-    const service = new UploadsService();
+    const service = new UploadsService(jobs as JobsRepository);
     await service.createPresignedUpload({
       filename: 'report.pdf',
       contentType: 'application/pdf',
@@ -107,7 +119,7 @@ describe('UploadsService', () => {
   });
 
   it('uses the default region without endpoint or credentials when none are configured', () => {
-    new UploadsService();
+    new UploadsService(jobs as JobsRepository);
 
     expect(createClient).toHaveBeenCalledWith({ region: 'us-east-1' });
   });
@@ -116,7 +128,7 @@ describe('UploadsService', () => {
     const failure = new Error('presigner unavailable');
     const loggerError = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
     vi.mocked(createPresignedPost).mockRejectedValueOnce(failure);
-    const service = new UploadsService();
+    const service = new UploadsService(jobs as JobsRepository);
 
     const thrown = await service
       .createPresignedUpload({
@@ -135,5 +147,45 @@ describe('UploadsService', () => {
     expect(thrown).not.toHaveProperty('cause');
     expect(JSON.stringify(httpError.getResponse())).not.toContain(failure.message);
     expect(loggerError).toHaveBeenCalledWith('Failed to create presigned upload', failure.stack);
+    expect(jobs.create).not.toHaveBeenCalled();
+  });
+
+  it('waits for the job row before resolving the authorization', async () => {
+    let releaseInsert!: () => void;
+    jobs.create = vi.fn(() => new Promise<JobRecord>((resolve) => {
+      releaseInsert = () => resolve({} as never);
+    }));
+    const service = new UploadsService(jobs as JobsRepository);
+    let resolved = false;
+    const authorization = service.createPresignedUpload({
+      filename: 'report.pdf', contentType: 'application/pdf', sizeBytes: 1024,
+    }).then((value) => {
+      resolved = true;
+      return value;
+    });
+
+    await vi.waitFor(() => expect(jobs.create).toHaveBeenCalledOnce());
+    expect(resolved).toBe(false);
+    releaseInsert();
+    await expect(authorization).resolves.toMatchObject({ uploadId });
+    expect(resolved).toBe(true);
+  });
+
+  it('returns a generic service unavailable error when job persistence fails', async () => {
+    const loggerError = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+    jobs.create = vi.fn().mockRejectedValue(new Error('database credentials leaked'));
+    const service = new UploadsService(jobs as JobsRepository);
+
+    const thrown = await service.createPresignedUpload({
+      filename: 'report.pdf', contentType: 'application/pdf', sizeBytes: 1024,
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toMatchObject({
+      status: 503,
+      response: { statusCode: 503, message: 'Upload service unavailable', error: 'Service Unavailable' },
+    });
+    expect(JSON.stringify((thrown as { getResponse(): unknown }).getResponse()))
+      .not.toContain('database credentials leaked');
+    loggerError.mockRestore();
   });
 });
