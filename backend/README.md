@@ -32,7 +32,17 @@ loads `backend/.env` and requires `DATABASE_URL` to point to the local database.
 
 Development uses the Nest CLI compiler in watch mode. It recompiles and restarts
 when source changes. `build` clears and compiles production output to `dist/`;
-`start` runs `dist/main.js`.
+`start` runs `dist/main.js`. The build also emits `dist/worker.js` for the
+independent background worker.
+
+Run the worker in a separate terminal with `npm run dev:worker`; it uses
+`dist-worker/` so its watch compiler cannot clear or race the API's `dist/`.
+Run the production worker with `npm run start:worker`. Each process handles one
+SQS message at a time. Configure `SQS_QUEUE_URL`, `SQS_DLQ_URL`, and the
+`WORKER_*` timing variables in `.env`; shell variables take precedence. The
+worker validates the confirmed source object and marks it `source_checked` only
+after a streamed ETag and byte-count check. It does not parse, copy, promote,
+or remove the PDF, and this state does not make the upload chat-ready.
 
 Run checks and tests separately:
 

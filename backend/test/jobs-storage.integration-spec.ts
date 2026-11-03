@@ -95,6 +95,31 @@ integration('PostgreSQL jobs storage', () => {
     expect(await jobs.getJobStatus(input.uploadId)).toMatchObject({ status: 'failed', lastSafeError: 'source object is unavailable' });
   });
 
+  it('reconciles only queued or expired jobs from the DLQ', async () => {
+    const queued = { uploadId: randomUUID(), bucket: 'q', key: `incoming/${randomUUID()}.pdf`, etag: 'queued', sizeBytes: 10 };
+    await jobs.createJob(queued);
+    expect(await jobs.reconcileDeadLetter(queued.uploadId, 'retry limit reached')).toBe(true);
+    expect(await jobs.getJobStatus(queued.uploadId)).toMatchObject({ status: 'failed', lastSafeError: 'retry limit reached' });
+
+    const live = { uploadId: randomUUID(), bucket: 'q', key: `incoming/${randomUUID()}.pdf`, etag: 'live', sizeBytes: 10 };
+    await jobs.createJob(live);
+    const owner = randomUUID();
+    await jobs.claimJob(live.uploadId, owner, 60_000);
+    expect(await jobs.reconcileDeadLetter(live.uploadId, 'retry limit reached')).toBe(false);
+    expect(await jobs.getJobStatus(live.uploadId)).toMatchObject({ status: 'processing', ownerToken: owner });
+    await pool.query("UPDATE upload_jobs SET lease_expires_at = clock_timestamp() - interval '1 second' WHERE upload_id = $1", [live.uploadId]);
+    expect(await jobs.reconcileDeadLetter(live.uploadId, 'retry limit reached')).toBe(true);
+    expect(await jobs.getJobStatus(live.uploadId)).toMatchObject({ status: 'failed', ownerToken: null });
+
+    const completed = { uploadId: randomUUID(), bucket: 'q', key: `incoming/${randomUUID()}.pdf`, etag: 'done', sizeBytes: 10 };
+    await jobs.createJob(completed);
+    const completionOwner = randomUUID();
+    await jobs.claimJob(completed.uploadId, completionOwner, 60_000);
+    await jobs.finalizeJob(completed.uploadId, completionOwner);
+    expect(await jobs.reconcileDeadLetter(completed.uploadId, 'retry limit reached')).toBe(false);
+    expect(await jobs.getJobStatus(completed.uploadId)).toMatchObject({ status: 'source_checked' });
+  });
+
   it('supports expiring and fenced outbox claims and concurrent dispatch claims', async () => {
     const input = {
       uploadId: randomUUID(),

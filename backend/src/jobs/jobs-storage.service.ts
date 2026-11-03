@@ -152,6 +152,28 @@ export class JobsStorageService implements OnModuleDestroy {
     return current.rows[0]?.status === 'failed';
   }
 
+  async releaseJob(uploadId: string, ownerToken: string, lastSafeError: string): Promise<boolean> {
+    const updated = await this.pool.query(
+      `UPDATE upload_jobs
+       SET status = 'queued', owner_token = NULL, lease_expires_at = NULL,
+           last_safe_error = $3, updated_at = clock_timestamp()
+       WHERE upload_id = $1 AND owner_token = $2 AND status = 'processing' AND lease_expires_at > clock_timestamp()`,
+      [uploadId, ownerToken, lastSafeError.slice(0, 500)],
+    );
+    return updated.rowCount === 1;
+  }
+
+  async reconcileDeadLetter(uploadId: string, safeError: string): Promise<boolean> {
+    const updated = await this.pool.query(
+      `UPDATE upload_jobs
+       SET status = 'failed', owner_token = NULL, lease_expires_at = NULL,
+           last_safe_error = $2, updated_at = clock_timestamp()
+       WHERE upload_id = $1 AND (status = 'queued' OR (status = 'processing' AND lease_expires_at <= clock_timestamp()))`,
+      [uploadId, safeError.slice(0, 500)],
+    );
+    return updated.rowCount === 1;
+  }
+
   async claimOutbox(limit: number, ownerToken: string, leaseMs: number): Promise<OutboxMessage[]> {
     const result = await this.pool.query(
       `WITH candidates AS (

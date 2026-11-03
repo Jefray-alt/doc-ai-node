@@ -1,6 +1,6 @@
 import { SendMessageCommand } from '@aws-sdk/client-sqs';
-import { describe, expect, it, vi } from 'vitest';
-import { OutboxPublisherService } from './outbox-publisher.service.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { OutboxPublisherService, createOutboxSqsClient } from './outbox-publisher.service.js';
 
 const message = {
   uploadId: '5e9ab819-0040-40ac-a620-e87d01c0429e',
@@ -28,6 +28,8 @@ function setup() {
 }
 
 describe('outbox publisher', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   it('sends only the upload reference then marks the outbox row sent', async () => {
     const { jobs, sqs, publisher } = setup();
 
@@ -76,5 +78,17 @@ describe('outbox publisher', () => {
   it('requires a queue URL when constructed', () => {
     const jobs = { claimOutbox: vi.fn(), markOutboxSent: vi.fn(), releaseOutbox: vi.fn() };
     expect(() => new OutboxPublisherService(jobs as never, { send: vi.fn() } as never, { queueUrl: '' })).toThrow(/SQS queue URL/);
+  });
+
+  it('passes temporary AWS session credentials to the SQS client', async () => {
+    vi.stubEnv('AWS_ACCESS_KEY_ID', 'temporary-access');
+    vi.stubEnv('AWS_SECRET_ACCESS_KEY', 'temporary-secret');
+    vi.stubEnv('AWS_SESSION_TOKEN', 'temporary-session-token');
+    const client = createOutboxSqsClient();
+    try {
+      await expect(client.config.credentials()).resolves.toMatchObject({ sessionToken: 'temporary-session-token' });
+    } finally {
+      client.destroy();
+    }
   });
 });

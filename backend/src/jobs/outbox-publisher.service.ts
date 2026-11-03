@@ -42,7 +42,7 @@ export class OutboxPublisherService implements OnModuleDestroy {
     this.sqs.destroy();
   }
 
-  async dispatchOnce(): Promise<OutboxDispatchResult> {
+  async dispatchOnce(signal?: AbortSignal): Promise<OutboxDispatchResult> {
     const ownerToken = randomUUID();
     const messages = await this.jobs.claimOutbox(this.batchSize, ownerToken, this.leaseMs);
     const result: OutboxDispatchResult = { claimed: messages.length, sent: 0, released: 0 };
@@ -53,7 +53,7 @@ export class OutboxPublisherService implements OnModuleDestroy {
           QueueUrl: this.config.queueUrl,
           MessageBody: JSON.stringify({ uploadId: message.uploadId, payloadVersion: message.payloadVersion }),
           DelaySeconds: 0,
-        }));
+        }), signal ? { abortSignal: signal } : undefined);
       } catch {
         await this.jobs.releaseOutbox(message.uploadId, message.ownerToken, 'queue delivery failed');
         result.released += 1;
@@ -73,7 +73,7 @@ export function createOutboxSqsClient(): SQSClient {
     region: process.env.AWS_DEFAULT_REGION ?? 'us-east-1',
     ...(endpoint ? { endpoint } : {}),
     ...(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
-      ? { credentials: { accessKeyId: process.env.AWS_ACCESS_KEY_ID, secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY } }
+      ? { credentials: { accessKeyId: process.env.AWS_ACCESS_KEY_ID, secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY, ...(process.env.AWS_SESSION_TOKEN ? { sessionToken: process.env.AWS_SESSION_TOKEN } : {}) } }
       : {}),
   });
 }

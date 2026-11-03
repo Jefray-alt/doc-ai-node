@@ -59,6 +59,7 @@ describe('UploadsService', () => {
     vi.stubEnv('AWS_DEFAULT_REGION', undefined);
     vi.stubEnv('AWS_ACCESS_KEY_ID', undefined);
     vi.stubEnv('AWS_SECRET_ACCESS_KEY', undefined);
+    vi.stubEnv('AWS_SESSION_TOKEN', undefined);
     vi.stubEnv('S3_ENDPOINT_URL', undefined);
     vi.stubEnv('S3_QUARANTINE_BUCKET', undefined);
     vi.mocked(randomUUID).mockReturnValue(uploadId);
@@ -75,6 +76,16 @@ describe('UploadsService', () => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
     vi.clearAllMocks();
+  });
+
+  it('passes temporary AWS session credentials to the S3 client', () => {
+    vi.stubEnv('AWS_ACCESS_KEY_ID', 'temporary-access');
+    vi.stubEnv('AWS_SECRET_ACCESS_KEY', 'temporary-secret');
+    vi.stubEnv('AWS_SESSION_TOKEN', 'temporary-session-token');
+    createUploadsS3Client();
+    expect(createClient).toHaveBeenCalledWith(expect.objectContaining({
+      credentials: { accessKeyId: 'temporary-access', secretAccessKey: 'temporary-secret', sessionToken: 'temporary-session-token' },
+    }));
   });
 
   it('creates a five-minute PDF POST policy for a generated quarantine key', async () => {
