@@ -1,4 +1,6 @@
 import type { Pool } from 'pg';
+import { Inject, Injectable } from '@nestjs/common';
+import { DATABASE_POOL } from '../database/database.module.js';
 
 export type JobStatus = 'awaiting_upload' | 'pending_dispatch' | 'expired';
 
@@ -46,8 +48,9 @@ function toJobRecord(row: JobRow): JobRecord {
   };
 }
 
+@Injectable()
 export class JobsRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(@Inject(DATABASE_POOL) private readonly pool: Pool) {}
 
   async create(input: CreateJobInput): Promise<JobRecord> {
     const result = await this.pool.query<JobRow>(
