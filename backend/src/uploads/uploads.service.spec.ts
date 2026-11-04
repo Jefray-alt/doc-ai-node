@@ -61,6 +61,7 @@ describe('UploadsService', () => {
   });
 
   it('creates a five-minute PDF POST policy for a generated quarantine key', async () => {
+    const loggerLog = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
     const service = createService();
     const response = await service.createPresignedUpload({
       filename: 'report.pdf',
@@ -93,6 +94,9 @@ describe('UploadsService', () => {
         ['content-length-range', 1, MAX_UPLOAD_BYTES],
       ],
     });
+    expect(loggerLog).toHaveBeenCalledWith(
+      `Upload authorization created for ${uploadId} (status=awaiting_upload, expiresAt=2026-01-02T03:09:05.000Z)`,
+    );
   });
 
   it('uses the configured bucket and S3 client endpoint, region, and credentials', async () => {
@@ -151,11 +155,12 @@ describe('UploadsService', () => {
     });
     expect(thrown).not.toHaveProperty('cause');
     expect(JSON.stringify(httpError.getResponse())).not.toContain(failure.message);
-    expect(loggerError).toHaveBeenCalledWith('Failed to create presigned upload', failure.stack);
+    expect(loggerError).toHaveBeenCalledWith(`Failed to create presigned upload for ${uploadId}`, failure.stack);
     expect(jobs.create).not.toHaveBeenCalled();
   });
 
   it('waits for the job row before resolving the authorization', async () => {
+    const loggerLog = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
     let releaseInsert!: () => void;
     jobs.create = vi.fn(() => new Promise<JobRecord>((resolve) => {
       releaseInsert = () => resolve({} as never);
@@ -171,14 +176,18 @@ describe('UploadsService', () => {
 
     await vi.waitFor(() => expect(jobs.create).toHaveBeenCalledOnce());
     expect(resolved).toBe(false);
+    expect(loggerLog).not.toHaveBeenCalled();
     releaseInsert();
     await expect(authorization).resolves.toMatchObject({ uploadId });
     expect(resolved).toBe(true);
+    expect(loggerLog).toHaveBeenCalledOnce();
   });
 
   it('returns a generic service unavailable error when job persistence fails', async () => {
     const loggerError = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
-    jobs.create = vi.fn().mockRejectedValue(new Error('database credentials leaked'));
+    const loggerLog = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
+    const failure = new Error('database credentials leaked');
+    jobs.create = vi.fn().mockRejectedValue(failure);
     const service = createService();
 
     const thrown = await service.createPresignedUpload({
@@ -191,6 +200,8 @@ describe('UploadsService', () => {
     });
     expect(JSON.stringify((thrown as { getResponse(): unknown }).getResponse()))
       .not.toContain('database credentials leaked');
+    expect(loggerError).toHaveBeenCalledWith(`Failed to persist upload authorization for ${uploadId}`, failure.stack);
+    expect(loggerLog).not.toHaveBeenCalled();
     loggerError.mockRestore();
   });
 });

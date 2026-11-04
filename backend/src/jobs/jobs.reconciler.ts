@@ -36,13 +36,14 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly jobs: JobsRepository,
     private readonly s3: S3Client,
-  ) {}
+  ) { }
 
   private now(): Date {
     return new Date();
   }
 
   onModuleInit(): void {
+    this.logger.log('Starting job poller...')
     this.loopPromise = this.runLoop();
   }
 
@@ -105,13 +106,21 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!missing) {
-      await this.persist(job.uploadId, () => this.jobs.confirmUpload(job.uploadId));
+      await this.persist(
+        job.uploadId,
+        () => this.jobs.confirmUpload(job.uploadId),
+        `Upload confirmed for ${job.uploadId} (awaiting_upload -> pending_dispatch)`,
+      );
       return;
     }
 
     const graceEndsAt = job.uploadExpiresAt.getTime() + EXPIRY_GRACE_MS;
     if (this.now().getTime() > graceEndsAt) {
-      await this.persist(job.uploadId, () => this.jobs.expireMissingUpload(job.uploadId));
+      await this.persist(
+        job.uploadId,
+        () => this.jobs.expireMissingUpload(job.uploadId),
+        `Upload expired for ${job.uploadId} (awaiting_upload -> expired)`,
+      );
     } else {
       await this.persist(job.uploadId, () =>
         this.jobs.retryUploadCheck(job.uploadId, new Date(this.now().getTime() + CHECK_INTERVAL_MS)),
@@ -156,9 +165,14 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async persist(uploadId: string, update: () => Promise<boolean>): Promise<void> {
+  private async persist(
+    uploadId: string,
+    update: () => Promise<boolean>,
+    successMessage?: string,
+  ): Promise<void> {
     try {
-      await update();
+      const updated = await update();
+      if (updated && successMessage) this.logger.log(successMessage);
     } catch (error) {
       this.logger.error(
         `Failed to persist reconciliation for upload ${uploadId}`,

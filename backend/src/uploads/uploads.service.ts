@@ -42,7 +42,7 @@ export class UploadsService {
       }));
     } catch (error) {
       this.logger.error(
-        'Failed to create presigned upload',
+        `Failed to create presigned upload for ${uploadId}`,
         error instanceof Error ? error.stack : String(error),
       );
       throw new InternalServerErrorException('Failed to create presigned upload');
@@ -62,11 +62,15 @@ export class UploadsService {
       });
     } catch (error) {
       this.logger.error(
-        'Failed to persist upload authorization',
+        `Failed to persist upload authorization for ${uploadId}`,
         error instanceof Error ? error.stack : String(error),
       );
       throw new ServiceUnavailableException('Upload service unavailable');
     }
+
+    this.logger.log(
+      `Upload authorization created for ${uploadId} (status=awaiting_upload, expiresAt=${expiresAt.toISOString()})`,
+    );
 
     return {
       uploadId,
