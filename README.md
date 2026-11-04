@@ -46,12 +46,12 @@ Start the complete development environment from the repository root:
 npm run dev
 ```
 
-The launcher starts Floci with Docker Compose and waits for its bucket health
-checks before starting Vite and the NestJS API. Both application logs are
-labeled in the terminal. Vite and Nest watch source files and reload as you
-edit; open the URL printed by Vite (normally `http://localhost:5173`). Press
-Ctrl+C to stop both application processes. Floci stays running and retains its
-data.
+The launcher starts Floci and PostgreSQL with Docker Compose, waits for both
+health checks, and applies pending database migrations before starting Vite and
+the NestJS API. Both application logs are labeled in the terminal. Vite and Nest
+watch source files and reload as you edit; open the URL printed by Vite
+(normally `http://localhost:5173`). Press Ctrl+C to stop both application
+processes. The services stay running and retain their data.
 
 To run one application alone, use the existing application scripts:
 
@@ -124,9 +124,9 @@ name for other Compose commands, such as `restart floci` or `stop floci`, so
 they address the launcher's service. `stop floci` stops the service while
 keeping its container and data. `down` stops and removes the container while
 keeping stored objects in the named Compose volume. The `doc-ai-node` project
-name also means a worktree shares that project's Floci data; when Compose
-configuration paths change between worktrees, it may safely recreate the
-container while retaining the named volume.
+name also means a worktree shares that project's Floci and PostgreSQL data;
+when Compose configuration paths change between worktrees, it may safely
+recreate a container while retaining the named volume.
 
 To stop Floci while keeping the container and its data, run:
 
@@ -134,9 +134,20 @@ To stop Floci while keeping the container and its data, run:
 docker compose --project-name doc-ai-node stop floci
 ```
 
-To deliberately clear local data and recreate an empty bucket, run:
+To deliberately clear all local Floci objects and PostgreSQL job records, then
+recreate empty storage, run:
 
 ```sh
 docker compose --project-name doc-ai-node down -v
-docker compose --project-name doc-ai-node up -d --wait floci
+docker compose --project-name doc-ai-node up -d --wait floci postgres
 ```
+
+### Local PostgreSQL
+
+PostgreSQL 17 stores upload job state in a persistent Compose volume. Local
+credentials and the database name are in the root `.env.example`; the backend
+connection string is in `backend/.env.example`. The API retries upload
+reconciliation if PostgreSQL is unavailable, while `/health` remains available.
+The root launcher waits for PostgreSQL and runs repeat-safe migrations
+before starting development servers. To apply migrations manually, run
+`npm run db:migrate` from `backend/`.

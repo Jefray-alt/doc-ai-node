@@ -1,32 +1,26 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { S3Client } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { randomUUID } from 'node:crypto';
 import type { PresignUploadRequest, PresignedUploadResponse } from './uploads.dto.js';
 import { MAX_UPLOAD_BYTES } from './uploads.constants.js';
+import { JobsRepository } from '../jobs/jobs.repository.js';
 
 const UPLOAD_EXPIRY_SECONDS = 5 * 60;
 
 @Injectable()
 export class UploadsService {
-  private readonly s3: S3Client;
   private readonly logger = new Logger(UploadsService.name);
 
-  constructor() {
-    const endpoint = process.env.S3_ENDPOINT_URL;
-    this.s3 = new S3Client({
-      region: process.env.AWS_DEFAULT_REGION ?? 'us-east-1',
-      ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
-      ...(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
-        ? {
-            credentials: {
-              accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-              secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-            },
-          }
-        : {}),
-    });
-  }
+  constructor(
+    private readonly jobs: JobsRepository,
+    private readonly s3: S3Client,
+  ) {}
 
   async createPresignedUpload(_input: PresignUploadRequest): Promise<PresignedUploadResponse> {
     const uploadId = randomUUID();
@@ -48,17 +42,41 @@ export class UploadsService {
       }));
     } catch (error) {
       this.logger.error(
-        'Failed to create presigned upload',
+        `Failed to create presigned upload for ${uploadId}`,
         error instanceof Error ? error.stack : String(error),
       );
       throw new InternalServerErrorException('Failed to create presigned upload');
     }
 
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + UPLOAD_EXPIRY_SECONDS * 1000);
+
+    try {
+      await this.jobs.create({
+        uploadId,
+        bucket,
+        objectKey: key,
+        status: 'awaiting_upload',
+        uploadExpiresAt: expiresAt,
+        nextCheckAt: now,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to persist upload authorization for ${uploadId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new ServiceUnavailableException('Upload service unavailable');
+    }
+
+    this.logger.log(
+      `Upload authorization created for ${uploadId} (status=awaiting_upload, expiresAt=${expiresAt.toISOString()})`,
+    );
+
     return {
       uploadId,
       url,
       fields,
-      expiresAt: new Date(Date.now() + UPLOAD_EXPIRY_SECONDS * 1000).toISOString(),
+      expiresAt: expiresAt.toISOString(),
     };
   }
 }

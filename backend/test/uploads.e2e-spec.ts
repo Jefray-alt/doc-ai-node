@@ -1,9 +1,10 @@
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { INestApplication } from '@nestjs/common';
+import { Logger, type INestApplication } from '@nestjs/common';
 import { AppModule } from '../src/app.module.js';
-import { UploadsService } from '../src/uploads/uploads.service.js';
+import { JobsRepository } from '../src/jobs/jobs.repository.js';
+import { JobsReconciler } from '../src/jobs/jobs.reconciler.js';
 
 process.env.AWS_ACCESS_KEY_ID = 'test';
 process.env.AWS_SECRET_ACCESS_KEY = 'test';
@@ -13,9 +14,15 @@ process.env.S3_QUARANTINE_BUCKET = 'doc-ai-local-quarantine';
 
 describe('PDF upload authorization', () => {
   let app: INestApplication;
+  const jobs = { create: vi.fn().mockResolvedValue({}) };
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(JobsRepository)
+      .useValue(jobs)
+      .overrideProvider(JobsReconciler)
+      .useValue({})
+      .compile();
     app = moduleRef.createNestApplication();
     await app.init();
   });
@@ -41,6 +48,14 @@ describe('PDF upload authorization', () => {
       expiresAt: expect.any(String),
     });
     expect(response.body.fields.key).toContain(response.body.uploadId);
+    expect(jobs.create).toHaveBeenLastCalledWith({
+      uploadId: response.body.uploadId,
+      bucket: 'doc-ai-local-quarantine',
+      objectKey: response.body.fields.key,
+      status: 'awaiting_upload',
+      uploadExpiresAt: new Date(response.body.expiresAt),
+      nextCheckAt: expect.any(Date),
+    });
 
     const policy = JSON.parse(Buffer.from(response.body.fields.Policy, 'base64').toString());
     expect(policy.conditions).toContainEqual(['eq', '$Content-Type', 'application/pdf']);
@@ -63,11 +78,7 @@ describe('PDF upload authorization', () => {
     [{ filename: 12, contentType: 'application/pdf', sizeBytes: 1 }],
     [{ filename: 'notes.pdf', contentType: 'application/pdf', sizeBytes: 20 * 1024 * 1024 + 1 }],
   ])('rejects invalid upload metadata: %j', async (payload) => {
-    const createPresignedUpload = vi.spyOn(
-      app.get(UploadsService),
-      'createPresignedUpload',
-    );
-    const callCount = createPresignedUpload.mock.calls.length;
+    const callCount = jobs.create.mock.calls.length;
 
     await request(app.getHttpServer())
       .post('/uploads/presign')
@@ -75,6 +86,26 @@ describe('PDF upload authorization', () => {
       .send(JSON.stringify(payload))
       .expect(400);
 
-    expect(createPresignedUpload).toHaveBeenCalledTimes(callCount);
+    expect(jobs.create).toHaveBeenCalledTimes(callCount);
+  });
+
+  it('does not return a usable authorization when job persistence fails', async () => {
+    const loggerError = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+    jobs.create.mockRejectedValueOnce(new Error('database password leaked'));
+
+    const response = await request(app.getHttpServer())
+      .post('/uploads/presign')
+      .send({ filename: 'quarterly report.pdf', contentType: 'application/pdf', sizeBytes: 1024 })
+      .expect(503);
+
+    expect(response.body).toEqual({
+      statusCode: 503,
+      message: 'Upload service unavailable',
+      error: 'Service Unavailable',
+    });
+    expect(JSON.stringify(response.body)).not.toContain('database password leaked');
+    expect(response.body).not.toHaveProperty('url');
+    expect(response.body).not.toHaveProperty('fields');
+    loggerError.mockRestore();
   });
 });
