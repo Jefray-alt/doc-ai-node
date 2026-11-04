@@ -36,8 +36,11 @@ npm start
 
 `npm test` runs all discovered unit and e2e suites. `npm run test:e2e` runs the
 HTTP and process-level suites under `test/`.
-`npm run test:floci` exercises the signed quarantine POST against the local
-Floci service and verifies the uploaded object is absent from the ingestion bucket.
+`npm run test:floci` exercises the signed quarantine POST, versioned S3 objects,
+the local SQS queue, the real scan worker, exact-version promotion, negative
+results, and processing-DLQ retries. Set `S3_ENDPOINT_URL` and
+`SQS_ENDPOINT_URL` to point it at an isolated Floci instance. It creates
+test-only queues and removes test objects by version.
 
 ## Health endpoint
 
@@ -52,8 +55,7 @@ curl -i http://localhost:3000/health
 ```
 
 This endpoint confirms the API process can respond. It does not check external
-services. PDF processing, validation, promotion from quarantine, and session
-handling are still pending.
+services. PDF processing, validation, and session handling are still pending.
 
 ## Direct PDF uploads
 
@@ -61,7 +63,28 @@ handling are still pending.
 and file size. It returns a short-lived presigned POST for a generated key in
 `doc-ai-local-quarantine`. The browser sends the file directly to Floci; the API
 does not receive the file bytes. A successful storage response means the PDF is
-awaiting validation and does not make it available for chat.
+awaiting a scan result. Only a clean result for that exact object version
+promotes it to the clean bucket; the simulator below exercises this flow without
+performing malware scanning.
+
+## Local scan-worker simulation
+
+Run the worker and simulator commands from `backend/`. The worker can be started
+with `npm run dev:scan-worker` during development or `npm run start:scan-worker`
+after `npm run build`. Once a quarantine object exists, publish a sample result:
+
+```sh
+npm run simulate:scan -- incoming/<uuid>.pdf
+npm run simulate:scan -- incoming/<uuid>.pdf threats
+npm run simulate:scan -- incoming/<uuid>.pdf clean --version-id <version-id>
+```
+
+Supported outcomes are `clean`, `threats`, `unsupported`, `accessdenied`, and
+`failed`. The simulator publishes a GuardDuty-shaped message directly to the
+configured SQS queue; it does not scan the uploaded bytes. Override
+`S3_ENDPOINT_URL` and `SQS_ENDPOINT_URL` when using an isolated Floci instance.
+See [quarantine scan operations](../docs/quarantine-scan-operations.md) for
+production queue, permission, retention, and monitoring guidance.
 
 ## Backend conventions
 
