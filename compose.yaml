@@ -6,11 +6,15 @@ services:
     env_file:
       - .env
     environment:
+      # Added for orbstack
+      FLOCI_RUN_AS_ROOT: true
       FLOCI_STORAGE_MODE: persistent
       FLOCI_STORAGE_PERSISTENT_PATH: /app/data
     volumes:
       - floci-data:/app/data
       - ./infra/floci/init:/etc/floci/init/start.d:ro
+      # Added for orbstack
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test:
         - CMD-SHELL
