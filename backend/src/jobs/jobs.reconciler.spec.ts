@@ -10,7 +10,7 @@ const now = new Date('2026-01-01T00:00:00.000Z');
 function job(uploadId: string, overrides: Partial<JobRecord> = {}): JobRecord {
   return {
     uploadId,
-    bucket: 'quarantine',
+    bucket: 'doc-ai-local-pdfs',
     objectKey: `incoming/${uploadId}.pdf`,
     status: 'awaiting_upload',
     uploadExpiresAt: new Date(now.getTime() - 10 * 60_000),

@@ -16,7 +16,7 @@ npm run dev
 ```
 
 The API listens on port 3000 by default. Copy `.env.example` to `.env` to use
-local Floci credentials and the quarantine bucket. Both `dev` and `start` load
+local Floci credentials and the PDF bucket. Both `dev` and `start` load
 this file when present; an existing shell environment variable takes precedence.
 
 Development uses the Nest CLI compiler in watch mode. It recompiles and restarts
@@ -57,7 +57,7 @@ npm start
 
 `npm test` runs all discovered unit and e2e suites. `npm run test:e2e` runs the
 HTTP and process-level suites under `test/`.
-`npm run test:floci` exercises the signed quarantine POST against the local
+`npm run test:floci` exercises the signed PDF POST against the local
 Floci service, then verifies the API reconciles the uploaded object into
 `pending_dispatch` while a presigned upload with no object stays in
 `awaiting_upload`.
@@ -75,14 +75,13 @@ curl -i http://localhost:3000/health
 ```
 
 This endpoint confirms the API process can respond. It does not check external
-services. PDF processing, validation, promotion from quarantine, and session
-handling are still pending.
+services. PDF validation and processing, and session handling are still pending.
 
 ## Direct PDF uploads
 
 `POST /uploads/presign` accepts a PDF filename, `application/pdf` content type,
 and file size. It records an `awaiting_upload` job in PostgreSQL before returning
-a short-lived presigned POST for a generated key in `doc-ai-local-quarantine`.
+a short-lived presigned POST for a generated key in `doc-ai-local-pdfs`.
 The browser sends the file directly to Floci; the API does not receive the file
 bytes. A successful storage response means the PDF is awaiting validation and
 does not make it available for chat. PostgreSQL and the initial migration must
@@ -95,12 +94,12 @@ Missing objects remain `awaiting_upload` through the ten-minute grace period
 after the upload authorization expires; a final missing-object check after that
 period moves the row to `expired`. Other S3 errors are retried and do not expire
 the upload. These states are retained in PostgreSQL for inspection; this does
-not yet dispatch work to a validation worker or delete quarantine objects. Each
+not yet dispatch work to a validation worker or delete uploaded objects. Each
 cycle reads due rows from PostgreSQL, so pending checks resume after an API
 restart.
 
 The default HTTP tests replace the jobs repository and need no running services.
-`npm run test:floci` runs only the real quarantine POST flow against the API and
+`npm run test:floci` runs only the real PDF POST flow against the API and
 Floci; it requires PostgreSQL with migrations already applied. Start both
 Compose services and apply the migration first:
 

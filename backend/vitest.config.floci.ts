@@ -3,7 +3,7 @@ import config from './vitest.config.js';
 
 export default mergeConfig(config, {
   test: {
-    include: ['test/quarantine-upload.integration-spec.ts'],
+    include: ['test/uploads-floci.integration-spec.ts'],
     exclude: ['src/**', 'test/**/*.e2e-spec.ts'],
   },
 });

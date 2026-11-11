@@ -11,7 +11,7 @@ const invalidFile = new File(['text'], 'notes.txt', { type: 'text/plain' })
 function presignResponse() {
   return {
     uploadId: 'upload-123',
-    url: 'http://localhost:4566/doc-ai-local-quarantine',
+    url: 'http://localhost:4566/doc-ai-local-pdfs',
     fields: { key: 'incoming/upload-123.pdf', Policy: 'signed-policy' },
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   }
@@ -44,7 +44,7 @@ describe('PdfUploadDialog', () => {
     expect(screen.getByRole('button', { name: 'Upload PDF' })).toBeDisabled()
   })
 
-  it('requests permission and posts the file directly to quarantine', async () => {
+  it('requests permission and posts the file directly to the PDF bucket', async () => {
     const user = userEvent.setup()
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => presignResponse() })
@@ -62,7 +62,7 @@ describe('PdfUploadDialog', () => {
       body: JSON.stringify({ filename: 'report.pdf', contentType: 'application/pdf', sizeBytes: file.size }),
     }))
     const [url, options] = fetchMock.mock.calls[1]
-    expect(url).toBe('http://localhost:4566/doc-ai-local-quarantine')
+    expect(url).toBe('http://localhost:4566/doc-ai-local-pdfs')
     expect(options.method).toBe('POST')
     expect(options.body).toBeInstanceOf(FormData)
     expect(options.body.get('key')).toBe('incoming/upload-123.pdf')
