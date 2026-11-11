@@ -38,7 +38,7 @@ describe('PostgreSQL upload jobs', () => {
     const objectKey = `integration/${uploadId}.pdf`;
     const created = await repository.create({
       uploadId,
-      bucket: 'integration-quarantine',
+      bucket: 'integration-pdfs',
       objectKey,
       status: 'awaiting_upload',
       uploadExpiresAt: new Date(Date.now() + 60_000),
@@ -51,7 +51,7 @@ describe('PostgreSQL upload jobs', () => {
     const persisted = await repository.findByUploadId(uploadId);
     expect(persisted).toMatchObject({
       uploadId,
-      bucket: 'integration-quarantine',
+      bucket: 'integration-pdfs',
       objectKey,
       status: 'awaiting_upload',
     });
@@ -59,7 +59,7 @@ describe('PostgreSQL upload jobs', () => {
     const laterId = randomUUID();
     await repository.create({
       uploadId: laterId,
-      bucket: 'integration-quarantine',
+      bucket: 'integration-pdfs',
       objectKey: `integration/${laterId}.pdf`,
       status: 'awaiting_upload',
       uploadExpiresAt: new Date(Date.now() + 60_000),
@@ -83,7 +83,7 @@ describe('PostgreSQL upload jobs', () => {
          VALUES ($1, $2, $3, $4, $5, $6)`,
         [
           randomUUID(),
-          'integration-quarantine',
+          'integration-pdfs',
           objectKey,
           'awaiting_upload',
           new Date(Date.now() + 60_000),
@@ -99,7 +99,7 @@ describe('PostgreSQL upload jobs', () => {
          VALUES ($1, $2, $3, $4, $5, $6)`,
         [
           randomUUID(),
-          'integration-quarantine',
+          'integration-pdfs',
           objectKey,
           'invalid',
           new Date(Date.now() + 60_000),
@@ -115,7 +115,7 @@ describe('PostgreSQL upload jobs', () => {
          VALUES ($1, $2, $3, $4, $5, $6)`,
         [
           'f73d16da-c995-451c-849b-6401a5c89157',
-          'integration-quarantine',
+          'integration-pdfs',
           'integration/expired.pdf',
           'awaiting_upload',
           null,

@@ -25,7 +25,7 @@ export class UploadsService {
   async createPresignedUpload(_input: PresignUploadRequest): Promise<PresignedUploadResponse> {
     const uploadId = randomUUID();
     const key = `incoming/${uploadId}.pdf`;
-    const bucket = process.env.S3_QUARANTINE_BUCKET ?? 'doc-ai-local-quarantine';
+    const bucket = process.env.S3_BUCKET_NAME ?? 'doc-ai-local-pdfs';
     let url: string;
     let fields: Record<string, string>;
     try {

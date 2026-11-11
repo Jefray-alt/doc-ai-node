@@ -72,10 +72,10 @@ The chat workspace supports sending messages with the Send button or Enter.
 Use Shift + Enter for a new line. Messages stay in memory for the current tab and
 are cleared when you refresh or close it; there are no accounts or saved chats.
 
-Use Add PDF to upload one PDF directly into the quarantine bucket. After upload,
+Use Add PDF to upload one PDF directly into the local PDF bucket. After upload,
 the workspace shows that the PDF is awaiting validation. The chat cannot use it
-until later processing and promotion steps are implemented. Upload status is
-held in memory and clears when you refresh the tab.
+until validation, processing, and chat readiness are implemented. Upload status
+is held in memory and clears when you refresh the tab.
 
 ### Backend
 
@@ -96,8 +96,8 @@ Run `npm test` for all TypeScript suites or `npm run test:e2e` for HTTP and
 process-level coverage. Backend modules, naming, and testing conventions are
 documented in [backend/README.md](backend/README.md).
 
-PDF validation, promotion from quarantine, document processing, and generated
-answers remain to be implemented.
+PDF validation, document processing, and generated answers remain to be
+implemented.
 
 ### Local S3 storage
 
@@ -111,11 +111,10 @@ docker compose --project-name doc-ai-node up -d --wait floci
 COMPOSE_PROJECT_NAME=doc-ai-node sh scripts/floci/smoke.sh
 ```
 
-Compose waits until both the ingestion bucket (`doc-ai-local-pdfs`) and
-quarantine bucket (`doc-ai-local-quarantine`) respond to S3 readiness checks.
-The quarantine bucket allows browser POST uploads from the local Vite origins.
-The smoke check uploads a temporary object to each bucket, compares downloaded
-bytes, and confirms deletion. It needs no AWS account or host AWS CLI.
+Compose waits until the PDF bucket (`doc-ai-local-pdfs`) responds to its S3
+readiness check. The bucket allows browser POST uploads from the local Vite
+origins. The smoke check uploads a temporary object, compares downloaded bytes,
+and confirms deletion. It needs no AWS account or host AWS CLI.
 
 See [.env.example](.env.example) for the local storage configuration loaded from
 `.env`. To inspect startup or initialization errors, run

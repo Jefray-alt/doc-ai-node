@@ -1,8 +1,7 @@
 #!/bin/sh
 set -eu
 
-ingestion_bucket=${S3_BUCKET_NAME:?Set S3_BUCKET_NAME in .env}
-quarantine_bucket=${S3_QUARANTINE_BUCKET_NAME:?Set S3_QUARANTINE_BUCKET_NAME in .env}
+pdf_bucket=${S3_BUCKET_NAME:?Set S3_BUCKET_NAME in .env}
 
 ensure_bucket() {
   bucket=$1
@@ -24,9 +23,8 @@ ensure_bucket() {
   esac
 }
 
-ensure_bucket "$ingestion_bucket"
-ensure_bucket "$quarantine_bucket"
+ensure_bucket "$pdf_bucket"
 
 aws s3api put-bucket-cors \
-  --bucket "$quarantine_bucket" \
+  --bucket "$pdf_bucket" \
   --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","http://127.0.0.1:5173"],"AllowedMethods":["POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3000}]}'

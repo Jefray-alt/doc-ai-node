@@ -10,7 +10,7 @@ process.env.AWS_ACCESS_KEY_ID = 'test';
 process.env.AWS_SECRET_ACCESS_KEY = 'test';
 process.env.AWS_DEFAULT_REGION = 'us-east-1';
 process.env.S3_ENDPOINT_URL = 'http://localhost:4566';
-process.env.S3_QUARANTINE_BUCKET = 'doc-ai-local-quarantine';
+process.env.S3_BUCKET_NAME = 'doc-ai-local-pdfs';
 
 describe('PDF upload authorization', () => {
   let app: INestApplication;
@@ -31,7 +31,7 @@ describe('PDF upload authorization', () => {
     await app.close();
   });
 
-  it('returns a short-lived PDF-only POST policy for a generated quarantine key', async () => {
+  it('returns a short-lived PDF-only POST policy for a generated incoming key', async () => {
     const response = await request(app.getHttpServer())
       .post('/uploads/presign')
       .send({ filename: 'quarterly report.pdf', contentType: 'application/pdf', sizeBytes: 1024 })
@@ -39,7 +39,7 @@ describe('PDF upload authorization', () => {
 
     expect(response.body).toMatchObject({
       uploadId: expect.any(String),
-      url: 'http://localhost:4566/doc-ai-local-quarantine',
+      url: 'http://localhost:4566/doc-ai-local-pdfs',
       fields: expect.objectContaining({
         key: expect.stringMatching(/^incoming\/[0-9a-f-]+\.pdf$/),
         'Content-Type': 'application/pdf',
@@ -50,7 +50,7 @@ describe('PDF upload authorization', () => {
     expect(response.body.fields.key).toContain(response.body.uploadId);
     expect(jobs.create).toHaveBeenLastCalledWith({
       uploadId: response.body.uploadId,
-      bucket: 'doc-ai-local-quarantine',
+      bucket: 'doc-ai-local-pdfs',
       objectKey: response.body.fields.key,
       status: 'awaiting_upload',
       uploadExpiresAt: new Date(response.body.expiresAt),

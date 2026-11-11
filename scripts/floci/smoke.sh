@@ -1,10 +1,8 @@
 #!/bin/sh
 set -eu
 
-ingestion_bucket=$(docker compose exec -T floci sh -c \
+pdf_bucket=$(docker compose exec -T floci sh -c \
   'printf "%s" "${S3_BUCKET_NAME:?Set S3_BUCKET_NAME in .env}"')
-quarantine_bucket=$(docker compose exec -T floci sh -c \
-  'printf "%s" "${S3_QUARANTINE_BUCKET_NAME:?Set S3_QUARANTINE_BUCKET_NAME in .env}"')
 payload="floci-smoke-$(date +%s)-$$"
 uploaded=0
 bucket=
@@ -56,7 +54,6 @@ check_bucket() {
   esac
 }
 
-check_bucket "$ingestion_bucket"
-check_bucket "$quarantine_bucket"
+check_bucket "$pdf_bucket"
 
 echo "Floci smoke check passed"

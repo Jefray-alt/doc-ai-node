@@ -42,10 +42,10 @@ describe('UploadsService', () => {
     vi.stubEnv('AWS_ACCESS_KEY_ID', undefined);
     vi.stubEnv('AWS_SECRET_ACCESS_KEY', undefined);
     vi.stubEnv('S3_ENDPOINT_URL', undefined);
-    vi.stubEnv('S3_QUARANTINE_BUCKET', undefined);
+    vi.stubEnv('S3_BUCKET_NAME', undefined);
     vi.mocked(randomUUID).mockReturnValue(uploadId);
     vi.mocked(createPresignedPost).mockResolvedValue({
-      url: 'https://storage.example.test/quarantine',
+      url: 'https://storage.example.test/pdfs',
       fields: { key: `incoming/${uploadId}.pdf`, Policy: 'signed-policy' },
     });
     vi.useFakeTimers();
@@ -60,7 +60,7 @@ describe('UploadsService', () => {
     vi.clearAllMocks();
   });
 
-  it('creates a five-minute PDF POST policy for a generated quarantine key', async () => {
+  it('creates a five-minute PDF POST policy for a generated incoming key', async () => {
     const loggerLog = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
     const service = createService();
     const response = await service.createPresignedUpload({
@@ -71,20 +71,20 @@ describe('UploadsService', () => {
 
     expect(response).toEqual({
       uploadId,
-      url: 'https://storage.example.test/quarantine',
+      url: 'https://storage.example.test/pdfs',
       fields: { key: `incoming/${uploadId}.pdf`, Policy: 'signed-policy' },
       expiresAt: '2026-01-02T03:09:05.000Z',
     });
     expect(jobs.create).toHaveBeenCalledWith({
       uploadId,
-      bucket: 'doc-ai-local-quarantine',
+      bucket: 'doc-ai-local-pdfs',
       objectKey: `incoming/${uploadId}.pdf`,
       status: 'awaiting_upload',
       uploadExpiresAt: new Date(response.expiresAt),
       nextCheckAt: fixedNow,
     });
     expect(signPost).toHaveBeenCalledWith(expect.anything(), {
-      Bucket: 'doc-ai-local-quarantine',
+      Bucket: 'doc-ai-local-pdfs',
       Key: `incoming/${uploadId}.pdf`,
       Expires: 5 * 60,
       Fields: { 'Content-Type': 'application/pdf' },
@@ -104,7 +104,7 @@ describe('UploadsService', () => {
     vi.stubEnv('AWS_ACCESS_KEY_ID', 'test-access-key');
     vi.stubEnv('AWS_SECRET_ACCESS_KEY', 'test-secret-key');
     vi.stubEnv('S3_ENDPOINT_URL', 'http://localhost:4566');
-    vi.stubEnv('S3_QUARANTINE_BUCKET', 'custom-quarantine');
+    vi.stubEnv('S3_BUCKET_NAME', 'custom-pdfs');
 
     const service = createService();
     await service.createPresignedUpload({
@@ -123,7 +123,7 @@ describe('UploadsService', () => {
       },
     });
     expect(signPost).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      Bucket: 'custom-quarantine',
+      Bucket: 'custom-pdfs',
     }));
   });
 

@@ -12,16 +12,15 @@ class ManualJobsReconciler extends JobsReconciler {
   override onModuleInit(): void {}
 }
 
-const quarantineBucket = 'doc-ai-local-quarantine';
-const ingestionBucket = 'doc-ai-local-pdfs';
+const pdfBucket = 'doc-ai-local-pdfs';
 
 process.env.AWS_ACCESS_KEY_ID = 'test';
 process.env.AWS_SECRET_ACCESS_KEY = 'test';
 process.env.AWS_DEFAULT_REGION = 'us-east-1';
 process.env.S3_ENDPOINT_URL = 'http://localhost:4566';
-process.env.S3_QUARANTINE_BUCKET = quarantineBucket;
+process.env.S3_BUCKET_NAME = pdfBucket;
 
-describe('Quarantine upload against Floci', () => {
+describe('PDF upload against Floci', () => {
   let app: INestApplication;
   let reconciler: ManualJobsReconciler;
   const s3 = new S3Client({
@@ -47,17 +46,17 @@ describe('Quarantine upload against Floci', () => {
     s3.destroy();
   });
 
-  it('accepts the signed browser POST into quarantine only', async () => {
+  it('stores the signed browser POST in the bucket recorded on its job', async () => {
     const missingAuthorization = await request(app.getHttpServer())
       .post('/uploads/presign')
       .send({ filename: 'missing.pdf', contentType: 'application/pdf', sizeBytes: 24 })
       .expect(201);
     const missingUploadId = missingAuthorization.body.uploadId as string;
-    const missingRow = await getDatabasePool().query<{ status: string }>(
-      'SELECT status FROM jobs WHERE upload_id = $1',
+    const missingRow = await getDatabasePool().query<{ status: string; bucket: string }>(
+      'SELECT status, bucket FROM jobs WHERE upload_id = $1',
       [missingUploadId],
     );
-    expect(missingRow.rows[0]?.status).toBe('awaiting_upload');
+    expect(missingRow.rows[0]).toEqual({ status: 'awaiting_upload', bucket: pdfBucket });
 
     const authorization = await request(app.getHttpServer())
       .post('/uploads/presign')
@@ -74,22 +73,23 @@ describe('Quarantine upload against Floci', () => {
       const response = await fetch(authorization.body.url as string, { method: 'POST', body });
       expect(response.status).toBe(204);
 
-      await expect(s3.send(new HeadObjectCommand({ Bucket: quarantineBucket, Key: key })))
+      await expect(s3.send(new HeadObjectCommand({ Bucket: pdfBucket, Key: key })))
         .resolves.toMatchObject({ $metadata: { httpStatusCode: 200 } });
 
-      const ingestionLookup = await s3
-        .send(new HeadObjectCommand({ Bucket: ingestionBucket, Key: key }))
-        .then(() => null, (error: unknown) => error);
-      expect(ingestionLookup).toMatchObject({ $metadata: { httpStatusCode: 404 } });
+      const uploadedRow = await getDatabasePool().query<{ bucket: string; object_key: string }>(
+        'SELECT bucket, object_key FROM jobs WHERE upload_id = $1',
+        [authorization.body.uploadId],
+      );
+      expect(uploadedRow.rows[0]).toEqual({ bucket: pdfBucket, object_key: key });
 
       await reconciler.onModuleDestroy();
       reconciler = new ManualJobsReconciler(new JobsRepository(getDatabasePool()), s3);
       await reconciler.reconcileOnce();
-      const reconciled = await getDatabasePool().query<{ status: string }>(
-        'SELECT status FROM jobs WHERE upload_id = $1',
+      const reconciled = await getDatabasePool().query<{ status: string; bucket: string }>(
+        'SELECT status, bucket FROM jobs WHERE upload_id = $1',
         [authorization.body.uploadId],
       );
-      expect(reconciled.rows[0]?.status).toBe('pending_dispatch');
+      expect(reconciled.rows[0]).toEqual({ status: 'pending_dispatch', bucket: pdfBucket });
 
       const retainedMissing = await getDatabasePool().query<{ status: string }>(
         'SELECT status FROM jobs WHERE upload_id = $1',
@@ -107,7 +107,7 @@ describe('Quarantine upload against Floci', () => {
         { status: 'pending_dispatch', count: '1' },
       ]);
     } finally {
-      await s3.send(new DeleteObjectCommand({ Bucket: quarantineBucket, Key: key }));
+      await s3.send(new DeleteObjectCommand({ Bucket: pdfBucket, Key: key }));
     }
   });
 });
