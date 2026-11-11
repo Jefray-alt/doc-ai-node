@@ -99,22 +99,52 @@ documented in [backend/README.md](backend/README.md).
 PDF validation, document processing, and generated answers remain to be
 implemented.
 
-### Local S3 storage
+### Local AWS infrastructure
 
-Local PDF storage uses Floci, an S3-compatible service in Docker. The root
-`npm run dev` command starts it with Docker Engine and Docker Compose v2. To
-start Floci by itself, use the same explicit Compose project name used by the
-launcher:
+Local AWS-compatible storage and queues use Floci in Docker. The root
+`npm run dev` command starts it with Docker Engine and Docker Compose v2. The
+root `.env.example` sets `S3_BUCKET_NAME=doc-ai-local-pdfs`,
+`SQS_QUEUE_NAME=doc-ai-local-pdf-validation`, and
+`SQS_DLQ_NAME=doc-ai-local-pdf-validation-dlq`; all three names can be changed
+in `.env`. If you already have a `.env` from before local SQS was added, append
+only missing queue settings so existing values are preserved:
+
+```sh
+grep -q '^SQS_QUEUE_NAME=' .env || printf '\nSQS_QUEUE_NAME=doc-ai-local-pdf-validation\n' >> .env
+grep -q '^SQS_DLQ_NAME=' .env || printf '\nSQS_DLQ_NAME=doc-ai-local-pdf-validation-dlq\n' >> .env
+```
+
+To start Floci by itself, use the same explicit Compose project name used by
+the launcher:
 
 ```sh
 docker compose --project-name doc-ai-node up -d --wait floci
 COMPOSE_PROJECT_NAME=doc-ai-node sh scripts/floci/smoke.sh
+COMPOSE_PROJECT_NAME=doc-ai-node sh scripts/floci/smoke-sqs.sh
 ```
 
-Compose waits until the PDF bucket (`doc-ai-local-pdfs`) responds to its S3
-readiness check. The bucket allows browser POST uploads from the local Vite
-origins. The smoke check uploads a temporary object, compares downloaded bytes,
-and confirms deletion. It needs no AWS account or host AWS CLI.
+Compose waits until the PDF bucket and both configured queues respond to their
+readiness checks. The bucket allows browser POST uploads from the local Vite
+origins. The S3 smoke check uploads a temporary object, compares downloaded
+bytes, and confirms deletion. The SQS smoke check creates uniquely named
+disposable queues through the same initialization hook, checks their defaults
+and DLQ redrive policy, exercises message deletion and redrive, then removes
+only those disposable queues on success or failure. Both checks run the AWS
+CLI inside Floci, so neither needs an AWS account or host AWS CLI.
+
+Discover the configured queue URLs from the Floci container:
+
+```sh
+docker compose --project-name doc-ai-node exec floci sh -c \
+  'aws sqs get-queue-url --queue-name "$SQS_QUEUE_NAME" --query QueueUrl --output text'
+docker compose --project-name doc-ai-node exec floci sh -c \
+  'aws sqs get-queue-url --queue-name "$SQS_DLQ_NAME" --query QueueUrl --output text'
+```
+
+The work queue starts with a 30 second visibility timeout, 20 second long poll,
+4 day message retention, and a redrive policy that moves messages after five
+receives. The DLQ retains messages for 14 days. These are infrastructure
+defaults only; application dispatch and queue consumption are not wired yet.
 
 See [.env.example](.env.example) for the local storage configuration loaded from
 `.env`. To inspect startup or initialization errors, run
@@ -122,10 +152,12 @@ See [.env.example](.env.example) for the local storage configuration loaded from
 name for other Compose commands, such as `restart floci` or `stop floci`, so
 they address the launcher's service. `stop floci` stops the service while
 keeping its container and data. `down` stops and removes the container while
-keeping stored objects in the named Compose volume. The `doc-ai-node` project
-name also means a worktree shares that project's Floci and PostgreSQL data;
+keeping stored objects, queues, and messages in the named Compose volume. The
+`doc-ai-node` project name also means a worktree shares that project's Floci and
+PostgreSQL data;
 when Compose configuration paths change between worktrees, it may safely
-recreate a container while retaining the named volume.
+recreate a container while retaining the named volume. On start, the queue init
+hook reconciles queue attributes while preserving queued messages.
 
 To stop Floci while keeping the container and its data, run:
 
@@ -133,8 +165,8 @@ To stop Floci while keeping the container and its data, run:
 docker compose --project-name doc-ai-node stop floci
 ```
 
-To deliberately clear all local Floci objects and PostgreSQL job records, then
-recreate empty storage, run:
+To deliberately clear all local Floci objects, queues, messages, and PostgreSQL
+job records, then recreate empty storage, run:
 
 ```sh
 docker compose --project-name doc-ai-node down -v
