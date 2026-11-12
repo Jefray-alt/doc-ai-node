@@ -48,6 +48,7 @@ describe('PDF upload against Floci', () => {
       .send({ filename: 'missing.pdf', contentType: 'application/pdf', sizeBytes: 24 })
       .expect(201);
     const missingUploadId = missingAuthorization.body.uploadId as string;
+    let uploadedId: string | undefined;
     const missingRow = await getDatabasePool().query<{ status: string; bucket: string }>(
       'SELECT status, bucket FROM jobs WHERE upload_id = $1',
       [missingUploadId],
@@ -58,6 +59,7 @@ describe('PDF upload against Floci', () => {
       .post('/uploads/presign')
       .send({ filename: 'integration.pdf', contentType: 'application/pdf', sizeBytes: 24 })
       .expect(201);
+    uploadedId = authorization.body.uploadId as string;
     const key = authorization.body.fields.key as string;
     const body = new FormData();
     for (const [name, value] of Object.entries(authorization.body.fields as Record<string, string>)) {
@@ -79,11 +81,12 @@ describe('PDF upload against Floci', () => {
       expect(uploadedRow.rows[0]).toEqual({ bucket: pdfBucket, object_key: key });
 
       await worker.get(JobsReconciler).reconcileOnce();
+      await worker.get(JobsReconciler).reconcileOnce();
       const reconciled = await getDatabasePool().query<{ status: string; bucket: string }>(
         'SELECT status, bucket FROM jobs WHERE upload_id = $1',
         [authorization.body.uploadId],
       );
-      expect(reconciled.rows[0]).toEqual({ status: 'pending_dispatch', bucket: pdfBucket });
+      expect(reconciled.rows[0]).toEqual({ status: 'uploaded', bucket: pdfBucket });
 
       const retainedMissing = await getDatabasePool().query<{ status: string }>(
         'SELECT status FROM jobs WHERE upload_id = $1',
@@ -98,10 +101,14 @@ describe('PDF upload against Floci', () => {
       );
       expect(relevantStatuses.rows).toEqual([
         { status: 'awaiting_upload', count: '1' },
-        { status: 'pending_dispatch', count: '1' },
+        { status: 'uploaded', count: '1' },
       ]);
     } finally {
       await s3.send(new DeleteObjectCommand({ Bucket: pdfBucket, Key: key }));
+      await getDatabasePool().query(
+        'DELETE FROM jobs WHERE upload_id = ANY($1::uuid[])',
+        [[missingUploadId, uploadedId]],
+      );
     }
   });
 });

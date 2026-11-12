@@ -41,7 +41,7 @@ describe('JobsReconciler', () => {
     vi.restoreAllMocks();
   });
 
-  it('checks at most 25 due rows sequentially and confirms only present objects', async () => {
+  it('checks exactly one due row per reconciliation and confirms only present objects', async () => {
     const jobs = Array.from({ length: 30 }, (_, index) => job(`upload-${index}`));
     const active: string[] = [];
     let maxActive = 0;
@@ -55,7 +55,7 @@ describe('JobsReconciler', () => {
       return {};
     });
     const repository = {
-      findDueAwaitingUploads: vi.fn().mockResolvedValue(jobs.slice(0, 25)),
+      findNextDueAwaitingUpload: vi.fn().mockResolvedValue(jobs[0]),
       confirmUpload: vi.fn().mockResolvedValue(true),
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn().mockResolvedValue(true),
@@ -64,32 +64,143 @@ describe('JobsReconciler', () => {
 
     await reconciler.reconcileOnce();
 
-    expect(repository.findDueAwaitingUploads).toHaveBeenCalledWith(25, expect.any(Date));
-    expect(send).toHaveBeenCalledTimes(25);
+    expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledWith(expect.any(Date));
+    expect(send).toHaveBeenCalledTimes(1);
     expect(maxActive).toBe(1);
     expect(repository.confirmUpload).toHaveBeenCalledWith('upload-0');
-    expect(repository.retryUploadCheck).toHaveBeenCalledWith('upload-1', expect.any(Date));
+    expect(repository.retryUploadCheck).not.toHaveBeenCalled();
     expect(repository.expireMissingUpload).not.toHaveBeenCalled();
-    expect(Logger.prototype.log).toHaveBeenCalledTimes(24);
+    expect(Logger.prototype.log).toHaveBeenCalledOnce();
     expect(Logger.prototype.log).not.toHaveBeenCalledWith(
-      'Upload confirmed for upload-1 (awaiting_upload -> pending_dispatch)',
+      'Upload confirmed for upload-1 (awaiting_upload -> uploaded)',
     );
+  });
+
+  it('drains successive due rows immediately after successful handling', async () => {
+    const first = job('first');
+    const second = job('second');
+    const repository = {
+      findNextDueAwaitingUpload: vi.fn()
+        .mockResolvedValueOnce(first)
+        .mockResolvedValueOnce(second)
+        .mockResolvedValue(null),
+      confirmUpload: vi.fn().mockResolvedValue(true),
+    };
+    const send = vi.fn().mockResolvedValue({});
+    const reconciler = new JobsReconciler(repository as never, { send } as never);
+    reconciler.onModuleInit();
+
+    await vi.waitFor(() => expect(repository.confirmUpload).toHaveBeenCalledTimes(2));
+
+    expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledTimes(3);
+    expect(send).toHaveBeenCalledTimes(2);
+    await reconciler.onModuleDestroy();
+  });
+
+  it('reschedules a missing row and immediately checks another due row', async () => {
+    const repository = {
+      findNextDueAwaitingUpload: vi.fn()
+        .mockResolvedValueOnce(job('still-waiting', { uploadExpiresAt: new Date(now.getTime()) }))
+        .mockResolvedValueOnce(job('present'))
+        .mockResolvedValue(null),
+      retryUploadCheck: vi.fn().mockResolvedValue(true),
+      confirmUpload: vi.fn().mockResolvedValue(true),
+    };
+    const send = vi.fn(async (command: HeadObjectCommand) => {
+      if (command.input.Key?.includes('/still-waiting.')) throw missingObject();
+      return {};
+    });
+    const reconciler = new JobsReconciler(repository as never, { send } as never);
+    reconciler.onModuleInit();
+
+    await vi.waitFor(() => expect(repository.confirmUpload).toHaveBeenCalledOnce());
+
+    expect(repository.retryUploadCheck).toHaveBeenCalledWith('still-waiting', expect.any(Date));
+    const retryAt = repository.retryUploadCheck.mock.calls[0]?.[1] as Date;
+    expect(retryAt.getTime() - now.getTime()).toBeGreaterThanOrEqual(5_000);
+    expect(retryAt.getTime() - now.getTime()).toBeLessThan(5_100);
+    expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledTimes(3);
+    expect(send).toHaveBeenCalledTimes(2);
+    await reconciler.onModuleDestroy();
+  });
+
+  it('waits five seconds after a due-row persistence update returns false', async () => {
+    const repository = {
+      findNextDueAwaitingUpload: vi.fn()
+        .mockResolvedValueOnce(job('write-failure'))
+        .mockResolvedValue(null),
+      confirmUpload: vi.fn().mockResolvedValue(false),
+    };
+    const reconciler = new JobsReconciler(repository as never, {
+      send: vi.fn().mockResolvedValue({}),
+    } as never);
+    reconciler.onModuleInit();
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(repository.confirmUpload).toHaveBeenCalledOnce();
+    expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.waitFor(() => expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledTimes(2));
+    await reconciler.onModuleDestroy();
+  });
+
+  it('waits five seconds after a due lookup or S3 failure', async () => {
+    const failedLookup = {
+      findNextDueAwaitingUpload: vi.fn()
+        .mockRejectedValueOnce(new Error('database unavailable'))
+        .mockResolvedValue(null),
+    };
+    const lookupReconciler = new JobsReconciler(failedLookup as never, { send: vi.fn() } as never);
+    lookupReconciler.onModuleInit();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(failedLookup.findNextDueAwaitingUpload).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(failedLookup.findNextDueAwaitingUpload).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(failedLookup.findNextDueAwaitingUpload).toHaveBeenCalledTimes(2);
+    await lookupReconciler.onModuleDestroy();
+
+    const failedS3 = {
+      findNextDueAwaitingUpload: vi.fn()
+        .mockResolvedValueOnce(job('s3-failure'))
+        .mockResolvedValue(null),
+      retryUploadCheck: vi.fn().mockResolvedValue(true),
+    };
+    const s3Reconciler = new JobsReconciler(failedS3 as never, {
+      send: vi.fn().mockRejectedValue(new Error('service unavailable')),
+    } as never);
+    s3Reconciler.onModuleInit();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(failedS3.retryUploadCheck).toHaveBeenCalledOnce();
+    expect(failedS3.findNextDueAwaitingUpload).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(failedS3.findNextDueAwaitingUpload).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(failedS3.findNextDueAwaitingUpload).toHaveBeenCalledTimes(2);
+    await s3Reconciler.onModuleDestroy();
   });
 
   it('expires only a missing object beyond the grace boundary, after HEAD confirms it is still missing', async () => {
     const send = vi.fn().mockRejectedValue(missingObject());
     const repository = {
-      findDueAwaitingUploads: vi.fn().mockResolvedValue([
-        job('inside', { uploadExpiresAt: new Date(now.getTime() - 10 * 60_000 + 1) }),
-        job('boundary', { uploadExpiresAt: new Date(now.getTime() - 10 * 60_000) }),
-        job('past', { uploadExpiresAt: new Date(now.getTime() - 10 * 60_000 - 1) }),
-      ]),
+      findNextDueAwaitingUpload: vi.fn()
+        .mockResolvedValueOnce(job('inside', { uploadExpiresAt: new Date(now.getTime() - 10 * 60_000 + 1) }))
+        .mockResolvedValueOnce(job('boundary', { uploadExpiresAt: new Date(now.getTime() - 10 * 60_000) }))
+        .mockResolvedValueOnce(job('past', { uploadExpiresAt: new Date(now.getTime() - 10 * 60_000 - 1) }))
+        .mockResolvedValue(null),
       confirmUpload: vi.fn().mockResolvedValue(true),
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn().mockResolvedValue(true),
     };
     const reconciler = new JobsReconciler(repository as never, { send } as never);
 
+    await reconciler.reconcileOnce();
+    await reconciler.reconcileOnce();
     await reconciler.reconcileOnce();
 
     expect(send).toHaveBeenCalledTimes(3);
@@ -103,7 +214,7 @@ describe('JobsReconciler', () => {
       $metadata: { httpStatusCode: 403 },
     });
     const repository = {
-      findDueAwaitingUploads: vi.fn().mockResolvedValue([job('forbidden')]),
+      findNextDueAwaitingUpload: vi.fn().mockResolvedValue(job('forbidden')),
       confirmUpload: vi.fn().mockResolvedValue(true),
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn().mockResolvedValue(true),
@@ -121,7 +232,7 @@ describe('JobsReconciler', () => {
   it('retries S3 request timeouts and does not treat them as missing objects', async () => {
     const timeout = Object.assign(new Error('request timed out'), { name: 'AbortError' });
     const repository = {
-      findDueAwaitingUploads: vi.fn().mockResolvedValue([job('timeout')]),
+      findNextDueAwaitingUpload: vi.fn().mockResolvedValue(job('timeout')),
       confirmUpload: vi.fn(),
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn(),
@@ -153,7 +264,7 @@ describe('JobsReconciler', () => {
       requestHandler: requestHandler as never,
     });
     const repository = {
-      findDueAwaitingUploads: vi.fn().mockResolvedValue([job('credential-timeout')]),
+      findNextDueAwaitingUpload: vi.fn().mockResolvedValue(job('credential-timeout')),
       confirmUpload: vi.fn(),
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn(),
@@ -201,7 +312,7 @@ describe('JobsReconciler', () => {
       requestHandler: requestHandler as never,
     });
     const repository = {
-      findDueAwaitingUploads: vi.fn().mockResolvedValue([job('shutdown-credential')]),
+      findNextDueAwaitingUpload: vi.fn().mockResolvedValue(job('shutdown-credential')),
       confirmUpload: vi.fn(),
       retryUploadCheck: vi.fn(),
       expireMissingUpload: vi.fn(),
@@ -233,31 +344,31 @@ describe('JobsReconciler', () => {
   it('waits five seconds after each completed cycle and never overlaps cycles', async () => {
     let completeFirst!: () => void;
     const repository = {
-      findDueAwaitingUploads: vi.fn()
-        .mockImplementationOnce(() => new Promise<JobRecord[]>((resolve) => {
-          completeFirst = () => resolve([]);
+      findNextDueAwaitingUpload: vi.fn()
+        .mockImplementationOnce(() => new Promise<JobRecord | null>((resolve) => {
+          completeFirst = () => resolve(null);
         }))
-        .mockResolvedValue([]),
+        .mockResolvedValue(null),
     };
     const reconciler = new JobsReconciler(repository as never, { send: vi.fn() } as never);
     reconciler.onModuleInit();
-    await vi.waitFor(() => expect(repository.findDueAwaitingUploads).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledTimes(1));
     await vi.advanceTimersByTimeAsync(20_000);
-    expect(repository.findDueAwaitingUploads).toHaveBeenCalledTimes(1);
+    expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledTimes(1);
 
     completeFirst();
     await Promise.resolve();
     await vi.advanceTimersByTimeAsync(4_999);
-    expect(repository.findDueAwaitingUploads).toHaveBeenCalledTimes(1);
+    expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
-    await vi.waitFor(() => expect(repository.findDueAwaitingUploads).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledTimes(2));
     await reconciler.onModuleDestroy();
   });
 
   it('aborts an active HEAD on shutdown and does not persist its stale result', async () => {
     let observedSignal!: AbortSignal;
     const repository = {
-      findDueAwaitingUploads: vi.fn().mockResolvedValue([job('active')]),
+      findNextDueAwaitingUpload: vi.fn().mockResolvedValue(job('active')),
       confirmUpload: vi.fn(),
       retryUploadCheck: vi.fn(),
       expireMissingUpload: vi.fn(),
@@ -283,34 +394,34 @@ describe('JobsReconciler', () => {
 
   it('logs a failed due-row fetch and allows the next cycle to retry', async () => {
     const repository = {
-      findDueAwaitingUploads: vi.fn().mockRejectedValue(new Error('database unavailable')),
+      findNextDueAwaitingUpload: vi.fn().mockRejectedValue(new Error('database unavailable')),
     };
     const reconciler = new JobsReconciler(repository as never, { send: vi.fn() } as never);
 
     await expect(reconciler.reconcileOnce()).resolves.toBeUndefined();
-    expect(repository.findDueAwaitingUploads).toHaveBeenCalledOnce();
+    expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledOnce();
     expect(Logger.prototype.log).not.toHaveBeenCalled();
   });
 
   it('coalesces concurrent reconciliation requests into one in-process cycle', async () => {
-    let finishFetch!: (jobs: JobRecord[]) => void;
+    let finishFetch!: (nextJob: JobRecord | null) => void;
     const repository = {
-      findDueAwaitingUploads: vi.fn(() => new Promise<JobRecord[]>((resolve) => {
+      findNextDueAwaitingUpload: vi.fn(() => new Promise<JobRecord | null>((resolve) => {
         finishFetch = resolve;
       })),
     };
     const reconciler = new JobsReconciler(repository as never, { send: vi.fn() } as never);
     const first = reconciler.reconcileOnce();
     const second = reconciler.reconcileOnce();
-    expect(repository.findDueAwaitingUploads).toHaveBeenCalledOnce();
-    finishFetch([]);
+    expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledOnce();
+    finishFetch(null);
     await Promise.all([first, second]);
   });
 
   it('logs a transition write failure with its upload ID and continues the cycle', async () => {
     const failure = new Error('database write failed');
     const repository = {
-      findDueAwaitingUploads: vi.fn().mockResolvedValue([job('write-failure')]),
+      findNextDueAwaitingUpload: vi.fn().mockResolvedValue(job('write-failure')),
       confirmUpload: vi.fn().mockRejectedValue(failure),
     };
     const reconciler = new JobsReconciler(repository as never, { send: vi.fn().mockResolvedValue({}) } as never);
@@ -327,10 +438,9 @@ describe('JobsReconciler', () => {
     let resolveConfirm!: (updated: boolean) => void;
     let resolveExpire!: (updated: boolean) => void;
     const repository = {
-      findDueAwaitingUploads: vi.fn().mockResolvedValue([
-        job('confirmed'),
-        job('expired', { uploadExpiresAt: new Date(now.getTime() - 10 * 60_000 - 1) }),
-      ]),
+      findNextDueAwaitingUpload: vi.fn()
+        .mockResolvedValueOnce(job('confirmed'))
+        .mockResolvedValueOnce(job('expired', { uploadExpiresAt: new Date(now.getTime() - 10 * 60_000 - 1) })),
       confirmUpload: vi.fn(() => new Promise<boolean>((resolve) => { resolveConfirm = resolve; })),
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn(() => new Promise<boolean>((resolve) => { resolveExpire = resolve; })),
@@ -348,16 +458,18 @@ describe('JobsReconciler', () => {
     expect(Logger.prototype.log).not.toHaveBeenCalled();
 
     resolveConfirm(true);
+    await cycle;
+    const expiryCycle = reconciler.reconcileOnce();
     await vi.waitFor(() => expect(repository.expireMissingUpload).toHaveBeenCalledOnce());
     expect(Logger.prototype.log).toHaveBeenCalledWith(
-      'Upload confirmed for confirmed (awaiting_upload -> pending_dispatch)',
+      'Upload confirmed for confirmed (awaiting_upload -> uploaded)',
     );
     expect(Logger.prototype.log).not.toHaveBeenCalledWith(
       'Upload expired for expired (awaiting_upload -> expired)',
     );
 
     resolveExpire(true);
-    await cycle;
+    await expiryCycle;
 
     expect(Logger.prototype.log).toHaveBeenCalledWith(
       'Upload expired for expired (awaiting_upload -> expired)',
@@ -366,10 +478,9 @@ describe('JobsReconciler', () => {
 
   it('does not log successful transitions when repository writes return false', async () => {
     const repository = {
-      findDueAwaitingUploads: vi.fn().mockResolvedValue([
-        job('not-confirmed'),
-        job('not-expired', { uploadExpiresAt: new Date(now.getTime() - 10 * 60_000 - 1) }),
-      ]),
+      findNextDueAwaitingUpload: vi.fn()
+        .mockResolvedValueOnce(job('not-confirmed'))
+        .mockResolvedValueOnce(job('not-expired', { uploadExpiresAt: new Date(now.getTime() - 10 * 60_000 - 1) })),
       confirmUpload: vi.fn().mockResolvedValue(false),
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn().mockResolvedValue(false),
@@ -382,15 +493,16 @@ describe('JobsReconciler', () => {
     } as never);
 
     await reconciler.reconcileOnce();
+    await reconciler.reconcileOnce();
 
     expect(Logger.prototype.log).not.toHaveBeenCalled();
   });
 
   it('keeps empty polls and ordinary missing-object retries silent', async () => {
     const repository = {
-      findDueAwaitingUploads: vi.fn()
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([job('still-waiting', { uploadExpiresAt: new Date(now.getTime()) })]),
+      findNextDueAwaitingUpload: vi.fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(job('still-waiting', { uploadExpiresAt: new Date(now.getTime()) })),
       confirmUpload: vi.fn(),
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn(),

@@ -34,7 +34,7 @@ describe('API and worker module boundaries', () => {
     const endPool = vi.spyOn(databasePool, 'end');
     const worker = await Test.createTestingModule({ imports: [WorkerModule] })
       .overrideProvider(JobsRepository)
-      .useValue({ findDueAwaitingUploads: async () => [] })
+      .useValue({ findNextDueAwaitingUpload: async () => null })
       .overrideProvider(S3Client)
       .useValue(s3)
       .compile();

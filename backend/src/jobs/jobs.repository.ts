@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE_POOL } from '../database/database.module.js';
 
-export type JobStatus = 'awaiting_upload' | 'pending_dispatch' | 'expired';
+export type JobStatus = 'awaiting_upload' | 'uploaded' | 'expired';
 
 export interface JobRecord {
   uploadId: string;
@@ -81,21 +81,22 @@ export class JobsRepository {
     return row ? toJobRecord(row) : null;
   }
 
-  async findDueAwaitingUploads(limit: number, now: Date): Promise<JobRecord[]> {
+  async findNextDueAwaitingUpload(now: Date): Promise<JobRecord | null> {
     const result = await this.pool.query<JobRow>(
       `SELECT * FROM jobs
        WHERE status = 'awaiting_upload' AND next_check_at <= $1
        ORDER BY next_check_at, created_at
-       LIMIT $2`,
-      [now, limit],
+       LIMIT 1`,
+      [now],
     );
 
-    return result.rows.map(toJobRecord);
+    const row = result.rows[0];
+    return row ? toJobRecord(row) : null;
   }
 
   async confirmUpload(uploadId: string): Promise<boolean> {
     const result = await this.pool.query(
-      `UPDATE jobs SET status = 'pending_dispatch', updated_at = now()
+      `UPDATE jobs SET status = 'uploaded', updated_at = now()
        WHERE upload_id = $1 AND status = 'awaiting_upload'`,
       [uploadId],
     );
