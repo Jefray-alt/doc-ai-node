@@ -2,15 +2,11 @@ import { Test } from '@nestjs/testing';
 import { DeleteObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { INestApplication } from '@nestjs/common';
+import type { INestApplication, INestApplicationContext } from '@nestjs/common';
 import { AppModule } from '../src/app.module.js';
 import { getDatabasePool } from '../src/database/database.pool.js';
-import { JobsRepository } from '../src/jobs/jobs.repository.js';
 import { JobsReconciler } from '../src/jobs/jobs.reconciler.js';
-
-class ManualJobsReconciler extends JobsReconciler {
-  override onModuleInit(): void {}
-}
+import { WorkerModule } from '../src/worker.module.js';
 
 const pdfBucket = 'doc-ai-local-pdfs';
 
@@ -22,7 +18,7 @@ process.env.S3_BUCKET_NAME = pdfBucket;
 
 describe('PDF upload against Floci', () => {
   let app: INestApplication;
-  let reconciler: ManualJobsReconciler;
+  let worker: INestApplicationContext;
   const s3 = new S3Client({
     region: 'us-east-1',
     endpoint: 'http://localhost:4566',
@@ -31,18 +27,18 @@ describe('PDF upload against Floci', () => {
   });
 
   beforeAll(async () => {
-    reconciler = new ManualJobsReconciler(new JobsRepository(getDatabasePool()), s3);
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(JobsReconciler)
-      .useValue(reconciler)
-      .compile();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
+
+    const workerRef = await Test.createTestingModule({ imports: [WorkerModule] }).compile();
+    worker = workerRef;
+    await worker.init();
   });
 
   afterAll(async () => {
-    await reconciler.onModuleDestroy();
     await app.close();
+    await worker.close();
     s3.destroy();
   });
 
@@ -82,9 +78,7 @@ describe('PDF upload against Floci', () => {
       );
       expect(uploadedRow.rows[0]).toEqual({ bucket: pdfBucket, object_key: key });
 
-      await reconciler.onModuleDestroy();
-      reconciler = new ManualJobsReconciler(new JobsRepository(getDatabasePool()), s3);
-      await reconciler.reconcileOnce();
+      await worker.get(JobsReconciler).reconcileOnce();
       const reconciled = await getDatabasePool().query<{ status: string; bucket: string }>(
         'SELECT status, bucket FROM jobs WHERE upload_id = $1',
         [authorization.body.uploadId],

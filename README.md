@@ -48,10 +48,9 @@ npm run dev
 
 The launcher starts Floci and PostgreSQL with Docker Compose, waits for both
 health checks, and applies pending database migrations before starting Vite and
-the NestJS API. Both application logs are labeled in the terminal. Vite and Nest
-watch source files and reload as you edit; open the URL printed by Vite
-(normally `http://localhost:5173`). Press Ctrl+C to stop both application
-processes. The services stay running and retain their data.
+the NestJS API. All three application logs are labeled in the terminal. Vite, the NestJS API,
+and the standalone NestJS worker watch source files and reload as you edit; open the URL printed by Vite
+(normally `http://localhost:5173`). Press Ctrl+C to stop the application processes. The services stay running and retain their data.
 
 To run one application alone, use the existing application scripts:
 
@@ -84,7 +83,12 @@ Run backend npm commands from `backend/`:
 ```sh
 cd backend
 npm run dev
+npm run dev:worker
 ```
+
+Use `npm run dev:worker` in a separate terminal to run only the background worker.
+For production, run `npm run build`, then `npm start` for the API or
+`npm run start:worker` for the worker.
 
 Check the API with `curl http://localhost:3000/health`. It returns
 `{"status":"ok"}`. Set `PORT` in the environment or copy `backend/.env.example`

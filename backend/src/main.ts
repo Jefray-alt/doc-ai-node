@@ -1,14 +1,9 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
+import { loadEnvironment } from './environment.js';
 
-try {
-  process.loadEnvFile();
-} catch (error) {
-  if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') {
-    throw error;
-  }
-}
+loadEnvironment();
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);

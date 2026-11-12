@@ -1,4 +1,3 @@
-import { S3Client } from '@aws-sdk/client-s3';
 import { Test } from '@nestjs/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DATABASE_POOL, DatabaseModule } from '../database/database.module.js';
@@ -28,19 +27,17 @@ describe('JobsRepository dependency injection', () => {
     await moduleRef.close();
   });
 
-  it('exports the repository and resolves the existing reconciler consumer from JobsModule', async () => {
+  it('exports the repository without starting reconciliation', async () => {
     const pool = { query: vi.fn().mockResolvedValue({ rows: [] }) };
     const moduleRef = await Test.createTestingModule({
       imports: [DatabaseModule, JobsModule],
     })
       .overrideProvider(DATABASE_POOL)
       .useValue(pool)
-      .overrideProvider(S3Client)
-      .useValue({ send: vi.fn(), destroy: vi.fn() })
       .compile();
 
     expect(moduleRef.get(JobsRepository)).toBeInstanceOf(JobsRepository);
-    expect(moduleRef.get(JobsReconciler)).toBeInstanceOf(JobsReconciler);
+    expect(() => moduleRef.get(JobsReconciler, { strict: false })).toThrow();
 
     await moduleRef.close();
   });

@@ -16,12 +16,14 @@ npm run dev
 ```
 
 The API listens on port 3000 by default. Copy `.env.example` to `.env` to use
-local Floci credentials and the PDF bucket. Both `dev` and `start` load
+local Floci credentials and the PDF bucket. The API and worker development and start commands load
 this file when present; an existing shell environment variable takes precedence.
 
 Development uses the Nest CLI compiler in watch mode. It recompiles and restarts
-when source changes. `build` clears and compiles production output to `dist/`;
-`start` runs `dist/main.js`.
+when source changes. `build` compiles the API to `dist/`; `start` runs `dist/main.js`.
+`dev:worker` watches the standalone background worker and writes to `dist-worker/`,
+separate from the API watch output. `build` also compiles the worker to `dist/worker.js`,
+which `start:worker` runs.
 
 ## PostgreSQL jobs
 
@@ -58,7 +60,7 @@ npm start
 `npm test` runs all discovered unit and e2e suites. `npm run test:e2e` runs the
 HTTP and process-level suites under `test/`.
 `npm run test:floci` exercises the signed PDF POST against the local
-Floci service, then verifies the API reconciles the uploaded object into
+Floci service, then verifies the worker reconciles the uploaded object into
 `pending_dispatch` while a presigned upload with no object stays in
 `awaiting_upload`.
 
@@ -87,7 +89,7 @@ bytes. A successful storage response means the PDF is awaiting validation and
 does not make it available for chat. PostgreSQL and the initial migration must
 be available for this endpoint to issue an authorization.
 
-The API's in-process reconciler checks due `awaiting_upload` rows every five
+The standalone worker's reconciler checks due `awaiting_upload` rows every five
 seconds, in batches of at most 25, using sequential S3 HEAD requests with a
 five-second request timeout. A present object moves to `pending_dispatch`.
 Missing objects remain `awaiting_upload` through the ten-minute grace period
@@ -113,7 +115,9 @@ DATABASE_URL=postgresql://doc_ai:doc_ai_dev@127.0.0.1:5432/doc_ai npm run test:f
 
 ## Backend conventions
 
-`src/main.ts` loads the optional backend `.env` file and starts `AppModule`.
+`src/main.ts` loads the optional backend `.env` file and starts `AppModule`;
+`src/worker.ts` loads the same file and starts a standalone application context
+without an HTTP listener. Both processes enable graceful shutdown hooks.
 The root module composes feature modules; `src/health/` owns the health
 controller. Keep each feature directly under `src/<feature>/` and put its module,
 controller, needed service, DTOs, and colocated unit tests there. Use constructor

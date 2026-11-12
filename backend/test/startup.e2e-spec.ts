@@ -8,6 +8,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 const backend = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const entry = resolve(backend, 'dist/main.js');
+const workerEntry = resolve(backend, 'dist/worker.js');
 const children: ReturnType<typeof spawn>[] = [];
 const fixtures: string[] = [];
 
@@ -63,6 +64,7 @@ async function expectHealth(port: number, options: { filePort?: number; shellPor
 
 describe.sequential('compiled process startup', () => {
   beforeAll(() => {
+    rmSync(resolve(backend, 'dist-worker'), { recursive: true, force: true });
     execFileSync('npm', ['run', 'build'], { cwd: backend, stdio: 'inherit' });
   });
 
@@ -84,6 +86,8 @@ describe.sequential('compiled process startup', () => {
 
   it('emits the production entry point without legacy or test artifacts', () => {
     expect(existsSync(entry)).toBe(true);
+    expect(existsSync(workerEntry)).toBe(true);
+    expect(existsSync(resolve(backend, 'dist-worker'))).toBe(false);
     expect(existsSync(resolve(backend, 'dist/server.js'))).toBe(false);
     expect(existsSync(resolve(backend, 'dist/app.js'))).toBe(false);
     expect(existsSync(resolve(backend, 'dist/test'))).toBe(false);
@@ -108,5 +112,41 @@ describe.sequential('compiled process startup', () => {
     const filePort = await availablePort();
     const shellPort = await availablePort();
     await expectHealth(shellPort, { filePort, shellPort });
+  });
+
+  it('starts the compiled worker without an HTTP listener and exits cleanly on SIGTERM', async () => {
+    const port = await availablePort();
+    const env = {
+      ...process.env,
+      DATABASE_URL: 'postgresql://test:test@127.0.0.1:1/disposable',
+      PORT: String(port),
+      AWS_ACCESS_KEY_ID: 'test',
+      AWS_SECRET_ACCESS_KEY: 'test',
+      AWS_DEFAULT_REGION: 'us-east-1',
+    };
+    const child = spawn('npm', ['run', 'start:worker'], { cwd: backend, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    children.push(child);
+    let output = '';
+    child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline && !output.includes('ECONNREFUSED')) {
+      if (child.exitCode !== null) throw new Error(`Worker exited (${child.exitCode}): ${output}`);
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    }
+    expect(output).toContain('Starting job poller');
+    expect(output).toContain('ECONNREFUSED');
+    await expect(fetch(`http://127.0.0.1:${port}/health`)).rejects.toThrow();
+
+    child.kill('SIGTERM');
+    const exitCode = await new Promise<number | null>((resolveExit) => {
+      const timeout = setTimeout(() => resolveExit(null), 8000);
+      child.once('exit', (code) => {
+        clearTimeout(timeout);
+        resolveExit(code);
+      });
+    });
+    expect(exitCode).toBe(0);
   });
 });
