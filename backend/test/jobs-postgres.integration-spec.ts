@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import { closeDatabasePool, getDatabasePool } from '../src/database/database.pool.js';
@@ -65,16 +67,15 @@ describe('PostgreSQL upload jobs', () => {
       uploadExpiresAt: new Date(Date.now() + 60_000),
       nextCheckAt: new Date(Date.now() - 1_000),
     });
-    const due = await repository.findDueAwaitingUploads(25, new Date());
-    expect(due.findIndex((job) => job.uploadId === laterId))
-      .toBeLessThan(due.findIndex((job) => job.uploadId === uploadId));
+    const due = await repository.findNextDueAwaitingUpload(new Date());
+    expect(due?.uploadId).toBe(laterId);
 
     expect(await repository.retryUploadCheck(uploadId, new Date(Date.now() + 5_000))).toBe(true);
     expect(await repository.confirmUpload(uploadId)).toBe(true);
     expect(await repository.retryUploadCheck(uploadId, new Date())).toBe(false);
     expect(await repository.expireMissingUpload(uploadId)).toBe(false);
     expect(await repository.confirmUpload(uploadId)).toBe(false);
-    await expect(repository.findByUploadId(uploadId)).resolves.toMatchObject({ status: 'pending_dispatch' });
+    await expect(repository.findByUploadId(uploadId)).resolves.toMatchObject({ status: 'uploaded' });
 
     await expect(
       adminPool.query(
@@ -123,5 +124,63 @@ describe('PostgreSQL upload jobs', () => {
         ],
       ),
     ).rejects.toMatchObject({ code: '23502' });
+  });
+
+  it('upgrades a persisted legacy pending_dispatch row without changing its identity or data', async () => {
+    const schema = `jobs_migration_${randomUUID().replaceAll('-', '')}`;
+    const scopedPool = new Pool({
+      connectionString: databaseUrl,
+      options: `-c search_path=${schema}`,
+    });
+    const uploadId = randomUUID();
+    const objectKey = `legacy/${uploadId}.pdf`;
+    const expiry = new Date('2026-01-01T00:00:00.000Z');
+    const nextCheck = new Date('2025-12-31T23:59:00.000Z');
+
+    try {
+      await adminPool.query(`CREATE SCHEMA ${schema}`);
+      const legacyMigration = await readFile(
+        fileURLToPath(new URL('../src/database/migrations/sql/001_create_jobs.sql', import.meta.url)),
+        'utf8',
+      );
+      await scopedPool.query(legacyMigration);
+      await scopedPool.query(`
+        CREATE TABLE schema_migrations (
+          version text PRIMARY KEY,
+          applied_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await scopedPool.query(
+        'INSERT INTO schema_migrations (version) VALUES ($1)',
+        ['001_create_jobs.sql'],
+      );
+      await scopedPool.query(
+        `INSERT INTO jobs
+          (upload_id, bucket, object_key, status, upload_expires_at, next_check_at)
+         VALUES ($1, $2, $3, 'pending_dispatch', $4, $5)`,
+        [uploadId, 'legacy-pdfs', objectKey, expiry, nextCheck],
+      );
+      const firstUpgrade = await migrateDatabase(scopedPool);
+      const repeatUpgrade = await migrateDatabase(scopedPool);
+      const upgraded = await scopedPool.query(
+        `SELECT upload_id, bucket, object_key, status, upload_expires_at, next_check_at
+         FROM jobs WHERE upload_id = $1`,
+        [uploadId],
+      );
+
+      expect(firstUpgrade.applied).toEqual(['002_uploaded_status.sql']);
+      expect(repeatUpgrade.applied).toEqual([]);
+      expect(upgraded.rows[0]).toEqual({
+        upload_id: uploadId,
+        bucket: 'legacy-pdfs',
+        object_key: objectKey,
+        status: 'uploaded',
+        upload_expires_at: expiry,
+        next_check_at: nextCheck,
+      });
+    } finally {
+      await scopedPool.end();
+      await adminPool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    }
   });
 });

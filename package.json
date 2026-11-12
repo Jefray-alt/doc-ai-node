@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "predev": "docker compose --project-name doc-ai-node up -d --wait floci postgres && npm --prefix backend run db:migrate",
-    "dev": "concurrently --kill-others --success first --names frontend,backend --prefix name --prefix-colors cyan,magenta \"npm --prefix frontend run dev\" \"npm --prefix backend run dev\""
+    "dev": "concurrently --kill-others --success first --names frontend,api,worker --prefix name --prefix-colors cyan,magenta,yellow \"npm --prefix frontend run dev\" \"npm --prefix backend run dev\" \"npm --prefix backend run dev:worker\""
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

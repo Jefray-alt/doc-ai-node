@@ -16,12 +16,14 @@ npm run dev
 ```
 
 The API listens on port 3000 by default. Copy `.env.example` to `.env` to use
-local Floci credentials and the PDF bucket. Both `dev` and `start` load
+local Floci credentials and the PDF bucket. The API and worker development and start commands load
 this file when present; an existing shell environment variable takes precedence.
 
 Development uses the Nest CLI compiler in watch mode. It recompiles and restarts
-when source changes. `build` clears and compiles production output to `dist/`;
-`start` runs `dist/main.js`.
+when source changes. `build` compiles the API to `dist/`; `start` runs `dist/main.js`.
+`dev:worker` watches the standalone background worker and writes to `dist-worker/`,
+separate from the API watch output. `build` also compiles the worker to `dist/worker.js`,
+which `start:worker` runs.
 
 ## PostgreSQL jobs
 
@@ -58,8 +60,8 @@ npm start
 `npm test` runs all discovered unit and e2e suites. `npm run test:e2e` runs the
 HTTP and process-level suites under `test/`.
 `npm run test:floci` exercises the signed PDF POST against the local
-Floci service, then verifies the API reconciles the uploaded object into
-`pending_dispatch` while a presigned upload with no object stays in
+Floci service, then verifies the worker reconciles the uploaded object into
+`uploaded` while a presigned upload with no object stays in
 `awaiting_upload`.
 
 ## Health endpoint
@@ -87,33 +89,43 @@ bytes. A successful storage response means the PDF is awaiting validation and
 does not make it available for chat. PostgreSQL and the initial migration must
 be available for this endpoint to issue an authorization.
 
-The API's in-process reconciler checks due `awaiting_upload` rows every five
-seconds, in batches of at most 25, using sequential S3 HEAD requests with a
-five-second request timeout. A present object moves to `pending_dispatch`.
+Run exactly one standalone worker replica in this first version. Its reconciler
+checks one due `awaiting_upload` row at a time, ordered by next check time and
+creation time, using S3 HEAD requests with a five-second request timeout. After
+successful handling it immediately checks the next due row; when none are due
+or an operational check or write fails, it waits five seconds before checking
+again. A present object moves to `uploaded`.
 Missing objects remain `awaiting_upload` through the ten-minute grace period
 after the upload authorization expires; a final missing-object check after that
 period moves the row to `expired`. Other S3 errors are retried and do not expire
-the upload. These states are retained in PostgreSQL for inspection; this does
-not yet dispatch work to a validation worker or delete uploaded objects. Each
-cycle reads due rows from PostgreSQL, so pending checks resume after an API
+the upload. `uploaded` confirms only that the S3 object exists. It does not
+validate, extract, embed, ingest, or dispatch the document, and it does not
+delete uploaded objects. Due checks resume from PostgreSQL after a worker
 restart.
 
 The default HTTP tests replace the jobs repository and need no running services.
 `npm run test:floci` runs only the real PDF POST flow against the API and
-Floci; it requires PostgreSQL with migrations already applied. Start both
-Compose services and apply the migration first:
+Floci; it requires an empty, uniquely named disposable PostgreSQL database
+with migrations applied. The test removes the two job rows it creates. Start
+the Compose services, create a disposable database, and apply its migrations
+first. Replace `doc_ai_floci_test` with a unique name for each run:
 
 ```sh
 cd ..
 docker compose --project-name doc-ai-node up -d --wait floci postgres
+docker compose --project-name doc-ai-node exec -T postgres psql -U doc_ai -d postgres -c "CREATE DATABASE doc_ai_floci_test"
 cd backend
-DATABASE_URL=postgresql://doc_ai:doc_ai_dev@127.0.0.1:5432/doc_ai npm run db:migrate
-DATABASE_URL=postgresql://doc_ai:doc_ai_dev@127.0.0.1:5432/doc_ai npm run test:floci
+DATABASE_URL=postgresql://doc_ai:doc_ai_dev@127.0.0.1:5432/doc_ai_floci_test npm run db:migrate
+DATABASE_URL=postgresql://doc_ai:doc_ai_dev@127.0.0.1:5432/doc_ai_floci_test npm run test:floci
+cd ..
+docker compose --project-name doc-ai-node exec -T postgres psql -U doc_ai -d postgres -c "DROP DATABASE doc_ai_floci_test"
 ```
 
 ## Backend conventions
 
-`src/main.ts` loads the optional backend `.env` file and starts `AppModule`.
+`src/main.ts` loads the optional backend `.env` file and starts `AppModule`;
+`src/worker.ts` loads the same file and starts a standalone application context
+without an HTTP listener. Both processes enable graceful shutdown hooks.
 The root module composes feature modules; `src/health/` owns the health
 controller. Keep each feature directly under `src/<feature>/` and put its module,
 controller, needed service, DTOs, and colocated unit tests there. Use constructor

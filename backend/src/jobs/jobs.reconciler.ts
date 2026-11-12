@@ -7,7 +7,6 @@ import { JobsRepository } from './jobs.repository.js';
 const CHECK_INTERVAL_MS = 5_000;
 const HEAD_TIMEOUT_MS = 5_000;
 const EXPIRY_GRACE_MS = 10 * 60_000;
-const MAX_BATCH_SIZE = 25;
 
 function isMissingObject(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
@@ -30,7 +29,7 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(JobsReconciler.name);
   private readonly shutdownController = new AbortController();
   private loopPromise: Promise<void> | undefined;
-  private activeCycle: Promise<void> | undefined;
+  private activeCycle: Promise<boolean> | undefined;
   private stopping = false;
 
   constructor(
@@ -57,40 +56,43 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
 
   async reconcileOnce(): Promise<void> {
     if (this.stopping) return;
+    await this.reconcileOneDueUpload();
+  }
+
+  private async reconcileOneDueUpload(): Promise<boolean> {
+    if (this.stopping) return false;
     if (this.activeCycle) return this.activeCycle;
     const cycle = this.reconcileDueUploads();
     this.activeCycle = cycle;
     try {
-      await cycle;
+      return await cycle;
     } finally {
       if (this.activeCycle === cycle) this.activeCycle = undefined;
     }
   }
 
-  private async reconcileDueUploads(): Promise<void> {
-    let due: JobRecord[];
+  private async reconcileDueUploads(): Promise<boolean> {
+    let due: JobRecord | null;
     try {
-      due = await this.jobs.findDueAwaitingUploads(MAX_BATCH_SIZE, this.now());
+      due = await this.jobs.findNextDueAwaitingUpload(this.now());
     } catch (error) {
       this.logger.error(
         'Failed to fetch due uploads for reconciliation',
         error instanceof Error ? error.stack : String(error),
       );
-      return;
+      return false;
     }
 
-    for (const job of due) {
-      if (this.stopping) return;
-      await this.reconcileUpload(job);
-    }
+    if (!due || this.stopping) return false;
+    return this.reconcileUpload(due);
   }
 
-  private async reconcileUpload(job: JobRecord): Promise<void> {
+  private async reconcileUpload(job: JobRecord): Promise<boolean> {
     let missing = false;
     try {
       await this.sendHeadObject(job);
     } catch (error) {
-      if (this.stopping) return;
+      if (this.stopping) return false;
       if (isMissingObject(error)) {
         missing = true;
       } else {
@@ -101,31 +103,30 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
         await this.persist(job.uploadId, () =>
           this.jobs.retryUploadCheck(job.uploadId, new Date(this.now().getTime() + CHECK_INTERVAL_MS)),
         );
-        return;
+        return false;
       }
     }
 
     if (!missing) {
-      await this.persist(
+      return this.persist(
         job.uploadId,
         () => this.jobs.confirmUpload(job.uploadId),
-        `Upload confirmed for ${job.uploadId} (awaiting_upload -> pending_dispatch)`,
+        `Upload confirmed for ${job.uploadId} (awaiting_upload -> uploaded)`,
       );
-      return;
     }
 
     const graceEndsAt = job.uploadExpiresAt.getTime() + EXPIRY_GRACE_MS;
     if (this.now().getTime() > graceEndsAt) {
-      await this.persist(
+      return this.persist(
         job.uploadId,
         () => this.jobs.expireMissingUpload(job.uploadId),
         `Upload expired for ${job.uploadId} (awaiting_upload -> expired)`,
       );
-    } else {
-      await this.persist(job.uploadId, () =>
-        this.jobs.retryUploadCheck(job.uploadId, new Date(this.now().getTime() + CHECK_INTERVAL_MS)),
-      );
     }
+
+    return this.persist(job.uploadId, () =>
+      this.jobs.retryUploadCheck(job.uploadId, new Date(this.now().getTime() + CHECK_INTERVAL_MS)),
+    );
   }
 
   private async sendHeadObject(job: JobRecord): Promise<void> {
@@ -169,22 +170,25 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
     uploadId: string,
     update: () => Promise<boolean>,
     successMessage?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const updated = await update();
       if (updated && successMessage) this.logger.log(successMessage);
+      return updated;
     } catch (error) {
       this.logger.error(
         `Failed to persist reconciliation for upload ${uploadId}`,
         error instanceof Error ? error.stack : String(error),
       );
+      return false;
     }
   }
 
   private async runLoop(): Promise<void> {
     while (!this.stopping) {
-      await this.reconcileOnce();
+      const handledSuccessfully = await this.reconcileOneDueUpload();
       if (this.stopping) return;
+      if (handledSuccessfully) continue;
       await new Promise<void>((resolve) => {
         const signal = this.shutdownController.signal;
         const finish = () => {

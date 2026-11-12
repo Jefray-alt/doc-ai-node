@@ -2,15 +2,11 @@ import { Test } from '@nestjs/testing';
 import { DeleteObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { INestApplication } from '@nestjs/common';
+import type { INestApplication, INestApplicationContext } from '@nestjs/common';
 import { AppModule } from '../src/app.module.js';
 import { getDatabasePool } from '../src/database/database.pool.js';
-import { JobsRepository } from '../src/jobs/jobs.repository.js';
 import { JobsReconciler } from '../src/jobs/jobs.reconciler.js';
-
-class ManualJobsReconciler extends JobsReconciler {
-  override onModuleInit(): void {}
-}
+import { WorkerModule } from '../src/worker.module.js';
 
 const pdfBucket = 'doc-ai-local-pdfs';
 
@@ -22,7 +18,7 @@ process.env.S3_BUCKET_NAME = pdfBucket;
 
 describe('PDF upload against Floci', () => {
   let app: INestApplication;
-  let reconciler: ManualJobsReconciler;
+  let worker: INestApplicationContext;
   const s3 = new S3Client({
     region: 'us-east-1',
     endpoint: 'http://localhost:4566',
@@ -31,18 +27,18 @@ describe('PDF upload against Floci', () => {
   });
 
   beforeAll(async () => {
-    reconciler = new ManualJobsReconciler(new JobsRepository(getDatabasePool()), s3);
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(JobsReconciler)
-      .useValue(reconciler)
-      .compile();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
+
+    const workerRef = await Test.createTestingModule({ imports: [WorkerModule] }).compile();
+    worker = workerRef;
+    await worker.init();
   });
 
   afterAll(async () => {
-    await reconciler.onModuleDestroy();
     await app.close();
+    await worker.close();
     s3.destroy();
   });
 
@@ -52,6 +48,7 @@ describe('PDF upload against Floci', () => {
       .send({ filename: 'missing.pdf', contentType: 'application/pdf', sizeBytes: 24 })
       .expect(201);
     const missingUploadId = missingAuthorization.body.uploadId as string;
+    let uploadedId: string | undefined;
     const missingRow = await getDatabasePool().query<{ status: string; bucket: string }>(
       'SELECT status, bucket FROM jobs WHERE upload_id = $1',
       [missingUploadId],
@@ -62,6 +59,7 @@ describe('PDF upload against Floci', () => {
       .post('/uploads/presign')
       .send({ filename: 'integration.pdf', contentType: 'application/pdf', sizeBytes: 24 })
       .expect(201);
+    uploadedId = authorization.body.uploadId as string;
     const key = authorization.body.fields.key as string;
     const body = new FormData();
     for (const [name, value] of Object.entries(authorization.body.fields as Record<string, string>)) {
@@ -82,14 +80,13 @@ describe('PDF upload against Floci', () => {
       );
       expect(uploadedRow.rows[0]).toEqual({ bucket: pdfBucket, object_key: key });
 
-      await reconciler.onModuleDestroy();
-      reconciler = new ManualJobsReconciler(new JobsRepository(getDatabasePool()), s3);
-      await reconciler.reconcileOnce();
+      await worker.get(JobsReconciler).reconcileOnce();
+      await worker.get(JobsReconciler).reconcileOnce();
       const reconciled = await getDatabasePool().query<{ status: string; bucket: string }>(
         'SELECT status, bucket FROM jobs WHERE upload_id = $1',
         [authorization.body.uploadId],
       );
-      expect(reconciled.rows[0]).toEqual({ status: 'pending_dispatch', bucket: pdfBucket });
+      expect(reconciled.rows[0]).toEqual({ status: 'uploaded', bucket: pdfBucket });
 
       const retainedMissing = await getDatabasePool().query<{ status: string }>(
         'SELECT status FROM jobs WHERE upload_id = $1',
@@ -104,10 +101,14 @@ describe('PDF upload against Floci', () => {
       );
       expect(relevantStatuses.rows).toEqual([
         { status: 'awaiting_upload', count: '1' },
-        { status: 'pending_dispatch', count: '1' },
+        { status: 'uploaded', count: '1' },
       ]);
     } finally {
       await s3.send(new DeleteObjectCommand({ Bucket: pdfBucket, Key: key }));
+      await getDatabasePool().query(
+        'DELETE FROM jobs WHERE upload_id = ANY($1::uuid[])',
+        [[missingUploadId, uploadedId]],
+      );
     }
   });
 });
