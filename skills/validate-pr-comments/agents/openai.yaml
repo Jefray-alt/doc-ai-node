@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate PR Comments"
+  short_description: "Check GitHub PR feedback against the code"
+  default_prompt: "Use $validate-pr-comments to assess the actionable comments in this GitHub pull request."
