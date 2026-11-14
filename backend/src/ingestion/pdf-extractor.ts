@@ -5,9 +5,9 @@ import {
   PdfExtractionError,
   PdfInputVerificationError,
   PdfPageLimitError,
-  type PdfPageConsumer,
-} from './pdf-extractor.types.js';
-export { PdfExtractionError, PdfInputVerificationError, PdfPageLimitError } from './pdf-extractor.types.js';
+} from './pdf-extractor.errors.js';
+import type { PdfPageConsumer } from './pdf-extractor.types.js';
+export { PdfExtractionError, PdfInputVerificationError, PdfPageLimitError } from './pdf-extractor.errors.js';
 export type { PdfPageConsumer, PdfPageText } from './pdf-extractor.types.js';
 
 const MAX_PDF_PAGES = 100;

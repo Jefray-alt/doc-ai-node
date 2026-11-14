@@ -1,8 +1,8 @@
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Injectable } from '@nestjs/common';
 import { MAX_UPLOAD_BYTES } from '../uploads/uploads.constants.js';
-import { DownloadTooLargeError } from './pdf-downloader.types.js';
-export { DownloadTooLargeError } from './pdf-downloader.types.js';
+import { DownloadTooLargeError } from './pdf-downloader.errors.js';
+export { DownloadTooLargeError } from './pdf-downloader.errors.js';
 
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 
