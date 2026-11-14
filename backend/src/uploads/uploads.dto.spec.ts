@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PresignUploadRequestSchema } from './uploads.dto.js';
-import { MAX_UPLOAD_BYTES } from './uploads.constants.js';
+import { PresignUploadRequestSchema } from './uploads.dto.ts';
+import { MAX_UPLOAD_BYTES } from './uploads.constants.ts';
 
 describe('PresignUploadRequestSchema', () => {
   it('accepts the exact upload boundaries and preserves the filename', () => {

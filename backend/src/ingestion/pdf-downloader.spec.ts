@@ -1,8 +1,8 @@
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MAX_UPLOAD_BYTES } from '../uploads/uploads.constants.js';
-import { DownloadTooLargeError, PdfDownloader } from './pdf-downloader.js';
+import { MAX_UPLOAD_BYTES } from '../uploads/uploads.constants.ts';
+import { DownloadTooLargeError, PdfDownloader } from './pdf-downloader.ts';
 
 function makeDownloader(body: Readable, contentLength?: number) {
   const send = vi.fn().mockResolvedValue({ Body: body, ContentLength: contentLength });

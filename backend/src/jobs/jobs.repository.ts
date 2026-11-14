@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import { Inject, Injectable } from '@nestjs/common';
-import { DATABASE_POOL } from '../database/database.module.js';
+import { DATABASE_POOL } from '../database/database.module.ts';
 
 export type JobStatus = 'awaiting_upload' | 'uploaded' | 'expired';
 

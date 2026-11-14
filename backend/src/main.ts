@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module.js';
-import { loadEnvironment } from './environment.js';
+import { AppModule } from './app.module.ts';
+import { loadEnvironment } from './environment.ts';
 
 loadEnvironment();
 

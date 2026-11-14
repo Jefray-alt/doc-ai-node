@@ -7,9 +7,9 @@ import {
 import { S3Client } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { randomUUID } from 'node:crypto';
-import type { PresignUploadRequest, PresignedUploadResponse } from './uploads.dto.js';
-import { MAX_UPLOAD_BYTES } from './uploads.constants.js';
-import { JobsRepository } from '../jobs/jobs.repository.js';
+import type { PresignUploadRequest, PresignedUploadResponse } from './uploads.dto.ts';
+import { MAX_UPLOAD_BYTES } from './uploads.constants.ts';
+import { JobsRepository } from '../jobs/jobs.repository.ts';
 
 const UPLOAD_EXPIRY_SECONDS = 5 * 60;
 

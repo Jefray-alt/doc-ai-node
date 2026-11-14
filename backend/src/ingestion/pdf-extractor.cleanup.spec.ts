@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { PdfExtractor } from './pdf-extractor.js';
+import { PdfExtractor } from './pdf-extractor.ts';
 
 vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
   getDocument: vi.fn(),

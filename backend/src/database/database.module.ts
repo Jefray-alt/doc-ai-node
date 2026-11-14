@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { closeDatabasePool, getDatabasePool } from './database.pool.js';
+import { closeDatabasePool, getDatabasePool } from './database.pool.ts';
 
 export const DATABASE_POOL = Symbol('DATABASE_POOL');
 

@@ -2,7 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
-import { closeDatabasePool, getDatabasePool } from '../database.pool.js';
+import { closeDatabasePool, getDatabasePool } from '../database.pool.ts';
 
 const migrationsDirectory = join(dirname(fileURLToPath(import.meta.url)), 'sql');
 

@@ -1,7 +1,7 @@
 import { Body, Controller, Post, UsePipes } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
-import { UploadsService } from './uploads.service.js';
-import { PresignUploadDto } from './uploads.dto.js';
+import { UploadsService } from './uploads.service.ts';
+import { PresignUploadDto } from './uploads.dto.ts';
 
 @Controller('uploads')
 export class UploadsController {

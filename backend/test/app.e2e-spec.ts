@@ -2,7 +2,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
-import { AppModule } from '../src/app.module.js';
+import { AppModule } from '../src/app.module.ts';
 
 describe('AppModule HTTP API', () => {
   let app: INestApplication;

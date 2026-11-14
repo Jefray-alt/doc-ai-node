@@ -3,10 +3,10 @@ import { DeleteObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/clien
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { INestApplication, INestApplicationContext } from '@nestjs/common';
-import { AppModule } from '../src/app.module.js';
-import { getDatabasePool } from '../src/database/database.pool.js';
-import { JobsReconciler } from '../src/jobs/jobs.reconciler.js';
-import { WorkerModule } from '../src/worker.module.js';
+import { AppModule } from '../src/app.module.ts';
+import { getDatabasePool } from '../src/database/database.pool.ts';
+import { JobsReconciler } from '../src/jobs/jobs.reconciler.ts';
+import { WorkerModule } from '../src/worker.module.ts';
 
 const pdfBucket = 'doc-ai-local-pdfs';
 

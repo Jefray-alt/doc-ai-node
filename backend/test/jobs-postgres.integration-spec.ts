@@ -3,9 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
-import { closeDatabasePool, getDatabasePool } from '../src/database/database.pool.js';
-import { migrateDatabase } from '../src/database/migrations/migrate.js';
-import { JobsRepository } from '../src/jobs/jobs.repository.js';
+import { closeDatabasePool, getDatabasePool } from '../src/database/database.pool.ts';
+import { migrateDatabase } from '../src/database/migrations/migrate.ts';
+import { JobsRepository } from '../src/jobs/jobs.repository.ts';
 
 const databaseUrl = process.env.DATABASE_URL;
 

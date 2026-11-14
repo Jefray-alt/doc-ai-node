@@ -1,7 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { S3Client } from '@aws-sdk/client-s3';
 import { describe, expect, it, vi } from 'vitest';
-import { S3Module } from './s3.module.js';
+import { S3Module } from './s3.module.ts';
 
 describe('S3Module', () => {
   it('destroys the registered client once during application shutdown', async () => {

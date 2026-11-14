@@ -1,7 +1,7 @@
 import { createZodDto } from 'nestjs-zod';
 import { extname } from 'node:path';
 import { z } from 'zod';
-import { MAX_UPLOAD_BYTES } from './uploads.constants.js';
+import { MAX_UPLOAD_BYTES } from './uploads.constants.ts';
 
 export const PresignUploadRequestSchema = z.object({
   filename: z.string().refine((filename) => extname(filename).toLowerCase() === '.pdf'),

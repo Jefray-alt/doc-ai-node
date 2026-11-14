@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { InternalServerErrorException, Logger } from '@nestjs/common';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
-import { UploadsService } from './uploads.service.js';
-import { createS3Client } from '../storage/s3.module.js';
-import { MAX_UPLOAD_BYTES } from './uploads.constants.js';
-import type { JobRecord, JobsRepository } from '../jobs/jobs.repository.js';
+import { UploadsService } from './uploads.service.ts';
+import { createS3Client } from '../storage/s3.module.ts';
+import { MAX_UPLOAD_BYTES } from './uploads.constants.ts';
+import type { JobRecord, JobsRepository } from '../jobs/jobs.repository.ts';
 
 const { createClient, signPost } = vi.hoisted(() => ({
   createClient: vi.fn(),

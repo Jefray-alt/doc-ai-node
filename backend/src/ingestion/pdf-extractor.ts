@@ -1,14 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { MAX_UPLOAD_BYTES } from '../uploads/uploads.constants.js';
+import { MAX_UPLOAD_BYTES } from '../uploads/uploads.constants.ts';
 import {
   PdfExtractionError,
   PdfInputVerificationError,
   PdfPageLimitError,
-} from './pdf-extractor.errors.js';
-import type { PdfPageConsumer } from './pdf-extractor.types.js';
-export { PdfExtractionError, PdfInputVerificationError, PdfPageLimitError } from './pdf-extractor.errors.js';
-export type { PdfPageConsumer, PdfPageText } from './pdf-extractor.types.js';
+} from './pdf-extractor.errors.ts';
+import type { PdfPageConsumer } from './pdf-extractor.types.ts';
+export { PdfExtractionError, PdfInputVerificationError, PdfPageLimitError } from './pdf-extractor.errors.ts';
+export type { PdfPageConsumer, PdfPageText } from './pdf-extractor.types.ts';
 
 const MAX_PDF_PAGES = 100;
 
