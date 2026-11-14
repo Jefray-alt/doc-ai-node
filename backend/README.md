@@ -77,7 +77,7 @@ curl -i http://localhost:3000/health
 ```
 
 This endpoint confirms the API process can respond. It does not check external
-services. PDF validation and processing, and session handling are still pending.
+services. Session handling is still pending.
 
 ## Direct PDF uploads
 
@@ -120,6 +120,29 @@ DATABASE_URL=postgresql://doc_ai:doc_ai_dev@127.0.0.1:5432/doc_ai_floci_test npm
 cd ..
 docker compose --project-name doc-ai-node exec -T postgres psql -U doc_ai -d postgres -c "DROP DATABASE doc_ai_floci_test"
 ```
+
+## Callable PDF extraction
+
+`IngestionService` provides an in-process API for a caller that already has an
+S3 bucket and object key:
+
+```ts
+await ingestionService.extract(bucket, key, async ({ pageNumber, text }) => {
+  await consumePage(pageNumber, text);
+}, signal);
+```
+
+It downloads the full object into memory, then parses and delivers one physical
+page at a time, keeping only the current page text while its consumer runs. The
+consumer owns any persistence. The download and extractor each enforce the 20
+MiB byte limit;
+the extractor also rejects PDFs with more than 100 physical pages. Blank pages
+are delivered with empty text, while a document with no extractable text is
+rejected. PDFs requiring a password and malformed PDFs have distinct extraction
+errors. Encrypted PDFs that open without a password are accepted. OCR is not
+performed. PDF parsing has no hard timeout and cannot be interrupted by the
+optional signal; the signal covers the S3 download only. This callable service
+is not yet connected to the job worker or an HTTP route.
 
 ## Backend conventions
 
