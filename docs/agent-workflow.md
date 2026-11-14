@@ -71,6 +71,34 @@ for corrections to that task. Children must not delegate or start nested
 agents. Do not begin the next task until this task has passed review and its
 commit is complete.
 
+### Model and reasoning selection
+
+The `implementer` uses `gpt-6.1-sol` with `xhigh` reasoning. The `developer`
+and `code_reviewer` files leave model and reasoning unset so the implementer
+can choose them for each task. Agent-file values take precedence over spawn
+choices; do not add worker pins to express a per-task preference.
+
+Before each spawn, the implementer records the selected model, reasoning effort,
+and a short rationale in the task brief. Pass both `model` and `reasoning_effort`
+explicitly with `fork_turns=none`; a prompt alone does not select the runtime
+configuration. Choose from the models and reasoning levels supported by the
+current tool. Without explicit choices, workers inherit applicable defaults.
+
+Use these starting points, adjusting to the task's ambiguity, scope, and risk:
+
+- `gpt-6-luna` with `xhigh` for simple scripts or narrow, well-specified work.
+- `gpt-6.1-sol` with `medium` for routine coding with clear requirements.
+- `gpt-6.1-sol` with `xhigh` for complicated code, cross-cutting changes, or
+  difficult debugging and design decisions.
+
+Choose the reviewer independently based on the review's difficulty and potential
+impact; it need not use the developer's configuration. Keep the same pair for
+corrections. If a requested configuration is unavailable, rejected, or still
+pinned by a loaded role, report the blocker without silently substituting a
+model. Configuration edits do not change already-running agents. Check the live
+role definitions before spawning; if they still show old pins, refresh or reload
+the project before relying on the new settings.
+
 The implementer provides a task ID, baseline, requirements and acceptance
 criteria, file ownership, dependencies, relevant earlier context, and expected
 checks before making changes. For code, use test-first development: demonstrate
