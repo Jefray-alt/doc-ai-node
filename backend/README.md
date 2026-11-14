@@ -146,6 +146,12 @@ is not yet connected to the job worker or an HTTP route.
 
 ## Backend conventions
 
+Use explicit `.ts` extensions for relative imports and re-exports of backend
+TypeScript files, including tests and Vitest configs. TypeScript rewrites these
+extensions to `.js` when emitting builds, so compiled Node.js entrypoints and
+runtime paths continue to use `.js`. Keep dependency imports at their published
+paths, including PDF.js `.mjs` imports.
+
 `src/main.ts` loads the optional backend `.env` file and starts `AppModule`;
 `src/worker.ts` loads the same file and starts a standalone application context
 without an HTTP listener. Both processes enable graceful shutdown hooks.

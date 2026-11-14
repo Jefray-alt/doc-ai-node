@@ -1,9 +1,9 @@
 import { Test } from '@nestjs/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DATABASE_POOL, DatabaseModule } from '../database/database.module.js';
-import { JobsModule } from './jobs.module.js';
-import { JobsRepository } from './jobs.repository.js';
-import { JobsReconciler } from './jobs.reconciler.js';
+import { DATABASE_POOL, DatabaseModule } from '../database/database.module.ts';
+import { JobsModule } from './jobs.module.ts';
+import { JobsRepository } from './jobs.repository.ts';
+import { JobsReconciler } from './jobs.reconciler.ts';
 
 describe('JobsRepository dependency injection', () => {
   afterEach(() => {

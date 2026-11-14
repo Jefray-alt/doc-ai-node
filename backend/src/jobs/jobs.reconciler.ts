@@ -1,8 +1,8 @@
 import { HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import type { JobRecord } from './jobs.repository.js';
-import { JobsRepository } from './jobs.repository.js';
+import type { JobRecord } from './jobs.repository.ts';
+import { JobsRepository } from './jobs.repository.ts';
 
 const CHECK_INTERVAL_MS = 5_000;
 const HEAD_TIMEOUT_MS = 5_000;

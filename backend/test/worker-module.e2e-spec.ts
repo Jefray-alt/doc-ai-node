@@ -2,11 +2,11 @@ import { S3Client } from '@aws-sdk/client-s3';
 import { Test } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
-import { AppModule } from '../src/app.module.js';
-import { getDatabasePool } from '../src/database/database.pool.js';
-import { JobsReconciler } from '../src/jobs/jobs.reconciler.js';
-import { JobsRepository } from '../src/jobs/jobs.repository.js';
-import { WorkerModule } from '../src/worker.module.js';
+import { AppModule } from '../src/app.module.ts';
+import { getDatabasePool } from '../src/database/database.pool.ts';
+import { JobsReconciler } from '../src/jobs/jobs.reconciler.ts';
+import { JobsRepository } from '../src/jobs/jobs.repository.ts';
+import { WorkerModule } from '../src/worker.module.ts';
 
 describe('API and worker module boundaries', () => {
   let api: INestApplication;

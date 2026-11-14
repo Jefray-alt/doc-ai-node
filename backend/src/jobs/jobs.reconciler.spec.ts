@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
 import { HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { AwsCredentialIdentity } from '@aws-sdk/types';
-import type { JobRecord } from './jobs.repository.js';
-import { JobsReconciler } from './jobs.reconciler.js';
+import type { JobRecord } from './jobs.repository.ts';
+import { JobsReconciler } from './jobs.reconciler.ts';
 
 const now = new Date('2026-01-01T00:00:00.000Z');
 

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { PdfDownloader } from './pdf-downloader.js';
-import { PdfExtractor } from './pdf-extractor.js';
-import type { PdfPageConsumer } from './pdf-extractor.types.js';
+import { PdfDownloader } from './pdf-downloader.ts';
+import { PdfExtractor } from './pdf-extractor.ts';
+import type { PdfPageConsumer } from './pdf-extractor.types.ts';
 
 @Injectable()
 export class IngestionService {

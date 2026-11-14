@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
-import { S3Module } from '../storage/s3.module.js';
-import { IngestionService } from './ingestion.service.js';
-import { PdfDownloader } from './pdf-downloader.js';
-import { PdfExtractor } from './pdf-extractor.js';
+import { S3Module } from '../storage/s3.module.ts';
+import { IngestionService } from './ingestion.service.ts';
+import { PdfDownloader } from './pdf-downloader.ts';
+import { PdfExtractor } from './pdf-extractor.ts';
 
 @Module({
   imports: [S3Module],
