@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { MAX_UPLOAD_BYTES } from '../uploads/uploads.constants.js';
 import {
@@ -32,6 +32,8 @@ function normalizeParserError(error: unknown): PdfExtractionError {
 
 @Injectable()
 export class PdfExtractor {
+  private readonly logger = new Logger(PdfExtractor.name);
+
   async extract(bytes: Uint8Array, consumer: PdfPageConsumer): Promise<void> {
     if (bytes.byteLength > MAX_UPLOAD_BYTES) {
       throw new PdfInputVerificationError('PDF_TOO_LARGE');
@@ -72,8 +74,11 @@ export class PdfExtractor {
         } catch (error) {
           try {
             page?.cleanup();
-          } catch {
-            // Preserve the parser failure if page cleanup fails.
+          } catch (cleanupError) {
+            this.logger.error(
+              `Failed to clean up PDF page ${pageNumber} after parsing failure`,
+              cleanupError instanceof Error ? cleanupError.stack : String(cleanupError),
+            );
           }
           throw normalizeParserError(error);
         }
@@ -85,8 +90,11 @@ export class PdfExtractor {
         } finally {
           try {
             page.cleanup();
-          } catch {
-            // Preserve the parse or consumer failure if page cleanup fails.
+          } catch (cleanupError) {
+            this.logger.error(
+              `Failed to clean up PDF page ${pageNumber} after consumer processing`,
+              cleanupError instanceof Error ? cleanupError.stack : String(cleanupError),
+            );
           }
         }
       }
@@ -99,14 +107,20 @@ export class PdfExtractor {
         if (document) {
           await document.cleanup();
         }
-      } catch {
-        // Preserve the parse or consumer failure if cleanup itself fails.
+      } catch (cleanupError) {
+        this.logger.error(
+          'Failed to clean up PDF document',
+          cleanupError instanceof Error ? cleanupError.stack : String(cleanupError),
+        );
       }
 
       try {
         await loadingTask?.destroy();
-      } catch {
-        // Preserve the parse or consumer failure if cleanup itself fails.
+      } catch (cleanupError) {
+        this.logger.error(
+          'Failed to destroy PDF loading task',
+          cleanupError instanceof Error ? cleanupError.stack : String(cleanupError),
+        );
       }
     }
   }
