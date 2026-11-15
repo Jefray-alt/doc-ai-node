@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
-import { DatabaseModule } from './database/database.module.ts';
-import { JobsModule } from './jobs/jobs.module.ts';
-import { JobsReconciler } from './jobs/jobs.reconciler.ts';
-import { S3Module } from './storage/s3.module.ts';
+import { DatabaseModule } from './database/database.module.js';
+import { JobsModule } from './jobs/jobs.module.js';
+import { IngestionModule } from './ingestion/ingestion.module.js';
+import { JobsReconciler } from './jobs/jobs.reconciler.js';
+import { S3Module } from './storage/s3.module.js';
 
 @Module({
-  imports: [DatabaseModule, JobsModule, S3Module],
+  imports: [DatabaseModule, JobsModule, S3Module, IngestionModule],
   providers: [JobsReconciler],
 })
-export class WorkerModule {}
+export class WorkerModule { }

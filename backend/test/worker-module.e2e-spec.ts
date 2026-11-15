@@ -2,11 +2,12 @@ import { S3Client } from '@aws-sdk/client-s3';
 import { Test } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
-import { AppModule } from '../src/app.module.ts';
-import { getDatabasePool } from '../src/database/database.pool.ts';
-import { JobsReconciler } from '../src/jobs/jobs.reconciler.ts';
-import { JobsRepository } from '../src/jobs/jobs.repository.ts';
-import { WorkerModule } from '../src/worker.module.ts';
+import { AppModule } from '../src/app.module.js';
+import { getDatabasePool } from '../src/database/database.pool.js';
+import { IngestionService } from '../src/ingestion/ingestion.service.js';
+import { JobsReconciler } from '../src/jobs/jobs.reconciler.js';
+import { JobsRepository } from '../src/jobs/jobs.repository.js';
+import { WorkerModule } from '../src/worker.module.js';
 
 describe('API and worker module boundaries', () => {
   let api: INestApplication;
@@ -34,13 +35,14 @@ describe('API and worker module boundaries', () => {
     const endPool = vi.spyOn(databasePool, 'end');
     const worker = await Test.createTestingModule({ imports: [WorkerModule] })
       .overrideProvider(JobsRepository)
-      .useValue({ findNextDueAwaitingUpload: async () => null })
+      .useValue({ findNextDueAwaitingUpload: async () => null, findNextDueUploaded: async () => null })
       .overrideProvider(S3Client)
       .useValue(s3)
       .compile();
     await worker.init();
 
     expect(worker.get(JobsReconciler)).toBeInstanceOf(JobsReconciler);
+    expect(worker.get(IngestionService)).toBeInstanceOf(IngestionService);
     expect('listen' in worker).toBe(false);
 
     await worker.close();

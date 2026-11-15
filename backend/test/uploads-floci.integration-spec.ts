@@ -3,10 +3,11 @@ import { DeleteObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/clien
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { INestApplication, INestApplicationContext } from '@nestjs/common';
-import { AppModule } from '../src/app.module.ts';
-import { getDatabasePool } from '../src/database/database.pool.ts';
-import { JobsReconciler } from '../src/jobs/jobs.reconciler.ts';
-import { WorkerModule } from '../src/worker.module.ts';
+import { AppModule } from '../src/app.module.js';
+import { getDatabasePool } from '../src/database/database.pool.js';
+import { JobsReconciler } from '../src/jobs/jobs.reconciler.js';
+import { WorkerModule } from '../src/worker.module.js';
+import { textPdf } from './fixtures/text-pdf.js';
 
 const pdfBucket = 'doc-ai-local-pdfs';
 
@@ -42,7 +43,10 @@ describe('PDF upload against Floci', () => {
     s3.destroy();
   });
 
-  it('stores the signed browser POST in the bucket recorded on its job', async () => {
+  it.each([
+    { label: 'valid text PDF', contents: textPdf(), status: 'extracted', pageCount: 1, errorCode: null },
+    { label: 'invalid PDF header', contents: 'invalid PDF contents', status: 'failed', pageCount: null, errorCode: 'PDF_INVALID_HEADER' },
+  ])('stores and processes a signed browser POST containing $label', async ({ contents, status, pageCount, errorCode }) => {
     const missingAuthorization = await request(app.getHttpServer())
       .post('/uploads/presign')
       .send({ filename: 'missing.pdf', contentType: 'application/pdf', sizeBytes: 24 })
@@ -57,7 +61,7 @@ describe('PDF upload against Floci', () => {
 
     const authorization = await request(app.getHttpServer())
       .post('/uploads/presign')
-      .send({ filename: 'integration.pdf', contentType: 'application/pdf', sizeBytes: 24 })
+      .send({ filename: 'integration.pdf', contentType: 'application/pdf', sizeBytes: Buffer.byteLength(contents) })
       .expect(201);
     uploadedId = authorization.body.uploadId as string;
     const key = authorization.body.fields.key as string;
@@ -65,7 +69,7 @@ describe('PDF upload against Floci', () => {
     for (const [name, value] of Object.entries(authorization.body.fields as Record<string, string>)) {
       body.append(name, value);
     }
-    body.append('file', new Blob(['%PDF-1.7 Floci integration'], { type: 'application/pdf' }), 'integration.pdf');
+    body.append('file', new Blob([contents], { type: 'application/pdf' }), 'integration.pdf');
 
     try {
       const response = await fetch(authorization.body.url as string, { method: 'POST', body });
@@ -82,11 +86,12 @@ describe('PDF upload against Floci', () => {
 
       await worker.get(JobsReconciler).reconcileOnce();
       await worker.get(JobsReconciler).reconcileOnce();
-      const reconciled = await getDatabasePool().query<{ status: string; bucket: string }>(
-        'SELECT status, bucket FROM jobs WHERE upload_id = $1',
+      await worker.get(JobsReconciler).reconcileOnce();
+      const reconciled = await getDatabasePool().query(
+        'SELECT status, bucket, page_count, error_code FROM jobs WHERE upload_id = $1',
         [authorization.body.uploadId],
       );
-      expect(reconciled.rows[0]).toEqual({ status: 'uploaded', bucket: pdfBucket });
+      expect(reconciled.rows[0]).toEqual({ status, bucket: pdfBucket, page_count: pageCount, error_code: errorCode });
 
       const retainedMissing = await getDatabasePool().query<{ status: string }>(
         'SELECT status FROM jobs WHERE upload_id = $1',
@@ -101,7 +106,7 @@ describe('PDF upload against Floci', () => {
       );
       expect(relevantStatuses.rows).toEqual([
         { status: 'awaiting_upload', count: '1' },
-        { status: 'uploaded', count: '1' },
+        { status, count: '1' },
       ]);
     } finally {
       await s3.send(new DeleteObjectCommand({ Bucket: pdfBucket, Key: key }));

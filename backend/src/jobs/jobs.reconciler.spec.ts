@@ -30,6 +30,13 @@ function missingObject() {
   });
 }
 
+function createReconciler(repository: object, s3: S3Client): JobsReconciler {
+  return new JobsReconciler({
+    findNextDueUploaded: vi.fn().mockResolvedValue(null),
+    ...repository,
+  } as never, s3, { extract: vi.fn() } as never);
+}
+
 describe('JobsReconciler', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -62,7 +69,7 @@ describe('JobsReconciler', () => {
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn().mockResolvedValue(true),
     };
-    const reconciler = new JobsReconciler(repository as never, { send } as never);
+    const reconciler = createReconciler(repository as never, { send } as never);
 
     await reconciler.reconcileOnce();
 
@@ -89,7 +96,7 @@ describe('JobsReconciler', () => {
       confirmUpload: vi.fn().mockResolvedValue(true),
     };
     const send = vi.fn().mockResolvedValue({});
-    const reconciler = new JobsReconciler(repository as never, { send } as never);
+    const reconciler = createReconciler(repository as never, { send } as never);
     reconciler.onModuleInit();
 
     await vi.waitFor(() => expect(repository.confirmUpload).toHaveBeenCalledTimes(2));
@@ -112,7 +119,7 @@ describe('JobsReconciler', () => {
       if (command.input.Key?.includes('/still-waiting.')) throw missingObject();
       return {};
     });
-    const reconciler = new JobsReconciler(repository as never, { send } as never);
+    const reconciler = createReconciler(repository as never, { send } as never);
     reconciler.onModuleInit();
 
     await vi.waitFor(() => expect(repository.confirmUpload).toHaveBeenCalledOnce());
@@ -133,7 +140,7 @@ describe('JobsReconciler', () => {
         .mockResolvedValue(null),
       confirmUpload: vi.fn().mockResolvedValue(false),
     };
-    const reconciler = new JobsReconciler(repository as never, {
+    const reconciler = createReconciler(repository as never, {
       send: vi.fn().mockResolvedValue({}),
     } as never);
     reconciler.onModuleInit();
@@ -155,7 +162,7 @@ describe('JobsReconciler', () => {
         .mockRejectedValueOnce(new Error('database unavailable'))
         .mockResolvedValue(null),
     };
-    const lookupReconciler = new JobsReconciler(failedLookup as never, { send: vi.fn() } as never);
+    const lookupReconciler = createReconciler(failedLookup as never, { send: vi.fn() } as never);
     lookupReconciler.onModuleInit();
     await vi.advanceTimersByTimeAsync(0);
     expect(failedLookup.findNextDueAwaitingUpload).toHaveBeenCalledOnce();
@@ -172,7 +179,7 @@ describe('JobsReconciler', () => {
         .mockResolvedValue(null),
       retryUploadCheck: vi.fn().mockResolvedValue(true),
     };
-    const s3Reconciler = new JobsReconciler(failedS3 as never, {
+    const s3Reconciler = createReconciler(failedS3 as never, {
       send: vi.fn().mockRejectedValue(new Error('service unavailable')),
     } as never);
     s3Reconciler.onModuleInit();
@@ -199,7 +206,7 @@ describe('JobsReconciler', () => {
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn().mockResolvedValue(true),
     };
-    const reconciler = new JobsReconciler(repository as never, { send } as never);
+    const reconciler = createReconciler(repository as never, { send } as never);
 
     await reconciler.reconcileOnce();
     await reconciler.reconcileOnce();
@@ -221,7 +228,7 @@ describe('JobsReconciler', () => {
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn().mockResolvedValue(true),
     };
-    const reconciler = new JobsReconciler(repository as never, {
+    const reconciler = createReconciler(repository as never, {
       send: vi.fn().mockRejectedValue(forbidden),
     } as never);
 
@@ -239,7 +246,7 @@ describe('JobsReconciler', () => {
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn(),
     };
-    const reconciler = new JobsReconciler(repository as never, {
+    const reconciler = createReconciler(repository as never, {
       send: vi.fn().mockRejectedValue(timeout),
     } as never);
 
@@ -271,7 +278,7 @@ describe('JobsReconciler', () => {
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn(),
     };
-    const reconciler = new JobsReconciler(repository as never, client);
+    const reconciler = createReconciler(repository as never, client);
     const cycle = reconciler.reconcileOnce();
 
     try {
@@ -319,7 +326,7 @@ describe('JobsReconciler', () => {
       retryUploadCheck: vi.fn(),
       expireMissingUpload: vi.fn(),
     };
-    const reconciler = new JobsReconciler(repository as never, client);
+    const reconciler = createReconciler(repository as never, client);
     const cycle = reconciler.reconcileOnce();
     let shutdownFinished = false;
     let shutdown!: Promise<void>;
@@ -352,7 +359,7 @@ describe('JobsReconciler', () => {
         }))
         .mockResolvedValue(null),
     };
-    const reconciler = new JobsReconciler(repository as never, { send: vi.fn() } as never);
+    const reconciler = createReconciler(repository as never, { send: vi.fn() } as never);
     reconciler.onModuleInit();
     await vi.waitFor(() => expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledTimes(1));
     await vi.advanceTimersByTimeAsync(20_000);
@@ -383,7 +390,7 @@ describe('JobsReconciler', () => {
         });
       }),
     };
-    const reconciler = new JobsReconciler(repository as never, s3 as never);
+    const reconciler = createReconciler(repository as never, s3 as never);
     reconciler.onModuleInit();
     await vi.waitFor(() => expect(s3.send).toHaveBeenCalledOnce());
 
@@ -398,7 +405,7 @@ describe('JobsReconciler', () => {
     const repository = {
       findNextDueAwaitingUpload: vi.fn().mockRejectedValue(new Error('database unavailable')),
     };
-    const reconciler = new JobsReconciler(repository as never, { send: vi.fn() } as never);
+    const reconciler = createReconciler(repository as never, { send: vi.fn() } as never);
 
     await expect(reconciler.reconcileOnce()).resolves.toBeUndefined();
     expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledOnce();
@@ -412,7 +419,7 @@ describe('JobsReconciler', () => {
         finishFetch = resolve;
       })),
     };
-    const reconciler = new JobsReconciler(repository as never, { send: vi.fn() } as never);
+    const reconciler = createReconciler(repository as never, { send: vi.fn() } as never);
     const first = reconciler.reconcileOnce();
     const second = reconciler.reconcileOnce();
     expect(repository.findNextDueAwaitingUpload).toHaveBeenCalledOnce();
@@ -426,7 +433,7 @@ describe('JobsReconciler', () => {
       findNextDueAwaitingUpload: vi.fn().mockResolvedValue(job('write-failure')),
       confirmUpload: vi.fn().mockRejectedValue(failure),
     };
-    const reconciler = new JobsReconciler(repository as never, { send: vi.fn().mockResolvedValue({}) } as never);
+    const reconciler = createReconciler(repository as never, { send: vi.fn().mockResolvedValue({}) } as never);
 
     await expect(reconciler.reconcileOnce()).resolves.toBeUndefined();
     expect(Logger.prototype.error).toHaveBeenCalledWith(
@@ -447,7 +454,7 @@ describe('JobsReconciler', () => {
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn(() => new Promise<boolean>((resolve) => { resolveExpire = resolve; })),
     };
-    const reconciler = new JobsReconciler(repository as never, {
+    const reconciler = createReconciler(repository as never, {
       send: vi.fn(async (command: HeadObjectCommand) => {
         if (command.input.Key?.includes('/expired.')) throw missingObject();
         return {};
@@ -487,7 +494,7 @@ describe('JobsReconciler', () => {
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn().mockResolvedValue(false),
     };
-    const reconciler = new JobsReconciler(repository as never, {
+    const reconciler = createReconciler(repository as never, {
       send: vi.fn(async (command: HeadObjectCommand) => {
         if (command.input.Key?.includes('/not-expired.')) throw missingObject();
         return {};
@@ -509,7 +516,7 @@ describe('JobsReconciler', () => {
       retryUploadCheck: vi.fn().mockResolvedValue(true),
       expireMissingUpload: vi.fn(),
     };
-    const reconciler = new JobsReconciler(repository as never, {
+    const reconciler = createReconciler(repository as never, {
       send: vi.fn().mockRejectedValue(missingObject()),
     } as never);
 
