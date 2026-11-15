@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
-import { closeDatabasePool, getDatabasePool } from '../src/database/database.pool.ts';
-import { migrateDatabase } from '../src/database/migrations/migrate.ts';
-import { JobsRepository } from '../src/jobs/jobs.repository.ts';
+import { closeDatabasePool, getDatabasePool } from '../src/database/database.pool.js';
+import { migrateDatabase } from '../src/database/migrations/migrate.js';
+import { JobsRepository } from '../src/jobs/jobs.repository.js';
+import type { JobStatus } from '../src/jobs/jobs.repository.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -16,6 +17,28 @@ if (!databaseUrl) {
 describe('PostgreSQL upload jobs', () => {
   const adminPool = new Pool({ connectionString: databaseUrl });
   const repository = new JobsRepository(getDatabasePool());
+
+  async function createJob(status: JobStatus, nextCheckAt: Date, createdAt?: Date) {
+    const uploadId = randomUUID();
+    const job = await repository.create({
+      uploadId,
+      bucket: 'integration-pdfs',
+      objectKey: `integration/${uploadId}.pdf`,
+      status,
+      uploadExpiresAt: new Date(nextCheckAt.getTime() + 60_000),
+      nextCheckAt,
+    });
+
+    if (createdAt) {
+      await adminPool.query('UPDATE jobs SET created_at = $2 WHERE upload_id = $1', [uploadId, createdAt]);
+    }
+
+    return job;
+  }
+
+  afterEach(async () => {
+    await adminPool.query('DELETE FROM jobs');
+  });
 
   afterAll(async () => {
     await closeDatabasePool();
@@ -49,6 +72,8 @@ describe('PostgreSQL upload jobs', () => {
 
     expect(created.uploadId).toBe(uploadId);
     expect(created.status).toBe('awaiting_upload');
+    expect(created.pageCount).toBeNull();
+    expect(created.errorCode).toBeNull();
 
     const persisted = await repository.findByUploadId(uploadId);
     expect(persisted).toMatchObject({
@@ -126,6 +151,88 @@ describe('PostgreSQL upload jobs', () => {
     ).rejects.toMatchObject({ code: '23502' });
   });
 
+  it('selects only uploaded jobs due now, ordered by schedule then creation time', async () => {
+    const now = new Date('2026-01-01T00:00:00.000Z');
+    await expect(repository.findNextDueUploaded(now)).resolves.toBeNull();
+    await createJob('uploaded', new Date(now.getTime() + 1));
+    await createJob('awaiting_upload', new Date(now.getTime() - 30_000));
+    await createJob('expired', new Date(now.getTime() - 30_000));
+    const newer = await createJob('uploaded', new Date(now.getTime() - 10_000), now);
+    const older = await createJob('uploaded', newer.nextCheckAt, new Date(now.getTime() - 1_000));
+    const boundary = await createJob('uploaded', now, new Date(now.getTime() - 20_000));
+
+    await expect(repository.findNextDueUploaded(now)).resolves.toMatchObject({ uploadId: older.uploadId });
+    await repository.failExtraction(older.uploadId, 'INVALID_PDF');
+    await expect(repository.findNextDueUploaded(now)).resolves.toMatchObject({ uploadId: newer.uploadId });
+    await repository.completeExtraction(newer.uploadId, 2);
+    await expect(repository.findNextDueUploaded(now)).resolves.toMatchObject({ uploadId: boundary.uploadId });
+    await repository.completeExtraction(boundary.uploadId, 1);
+    await expect(repository.findNextDueUploaded(now)).resolves.toBeNull();
+  });
+
+  it('persists operational retries and clears their error after successful extraction', async () => {
+    const now = new Date('2026-01-01T00:00:00.000Z');
+    const job = await createJob('uploaded', now);
+    const retryAt = new Date(now.getTime() + 5_000);
+
+    expect(await repository.retryExtraction(job.uploadId, 'S3_UNAVAILABLE', retryAt)).toBe(true);
+    await expect(repository.findByUploadId(job.uploadId)).resolves.toMatchObject({
+      status: 'uploaded', pageCount: null, errorCode: 'S3_UNAVAILABLE', nextCheckAt: retryAt,
+    });
+    await expect(repository.findNextDueUploaded(now)).resolves.toBeNull();
+    await expect(repository.findNextDueUploaded(retryAt)).resolves.toMatchObject({ uploadId: job.uploadId });
+
+    expect(await repository.completeExtraction(job.uploadId, 3)).toBe(true);
+    await expect(repository.findByUploadId(job.uploadId)).resolves.toMatchObject({
+      status: 'extracted', pageCount: 3, errorCode: null,
+    });
+  });
+
+  it('retains terminal failure codes without a page count', async () => {
+    const job = await createJob('uploaded', new Date());
+    await repository.retryExtraction(job.uploadId, 'S3_UNAVAILABLE', new Date(Date.now() + 5_000));
+
+    expect(await repository.failExtraction(job.uploadId, 'INVALID_PDF')).toBe(true);
+    await expect(repository.findByUploadId(job.uploadId)).resolves.toMatchObject({
+      status: 'failed', pageCount: null, errorCode: 'INVALID_PDF',
+    });
+  });
+
+  it('guards every extraction update against missing jobs and all other statuses', async () => {
+    const now = new Date();
+    const awaiting = await createJob('awaiting_upload', now);
+    const expired = await createJob('expired', now);
+    const extracted = await createJob('uploaded', now);
+    const failed = await createJob('uploaded', now);
+    await repository.completeExtraction(extracted.uploadId, 2);
+    await repository.failExtraction(failed.uploadId, 'ENCRYPTED_PDF');
+
+    for (const uploadId of [awaiting.uploadId, expired.uploadId, extracted.uploadId, failed.uploadId, randomUUID()]) {
+      const before = await repository.findByUploadId(uploadId);
+      expect(await repository.completeExtraction(uploadId, 9)).toBe(false);
+      expect(await repository.failExtraction(uploadId, 'INVALID_PDF')).toBe(false);
+      expect(await repository.retryExtraction(uploadId, 'S3_UNAVAILABLE', new Date(now.getTime() + 5_000))).toBe(false);
+      await expect(repository.findByUploadId(uploadId)).resolves.toEqual(before);
+    }
+  });
+
+  it('requires positive physical page counts on extracted jobs only', async () => {
+    const job = await createJob('uploaded', new Date());
+
+    for (const pageCount of [0, -1]) {
+      await expect(repository.completeExtraction(job.uploadId, pageCount)).rejects.toMatchObject({ code: '23514' });
+    }
+    await expect(adminPool.query(
+      "UPDATE jobs SET status = 'extracted' WHERE upload_id = $1", [job.uploadId],
+    )).rejects.toMatchObject({ code: '23514' });
+    await expect(adminPool.query(
+      'UPDATE jobs SET page_count = 1 WHERE upload_id = $1', [job.uploadId],
+    )).rejects.toMatchObject({ code: '23514' });
+    await expect(repository.findByUploadId(job.uploadId)).resolves.toMatchObject({
+      status: 'uploaded', pageCount: null,
+    });
+  });
+
   it('upgrades a persisted legacy pending_dispatch row without changing its identity or data', async () => {
     const schema = `jobs_migration_${randomUUID().replaceAll('-', '')}`;
     const scopedPool = new Pool({
@@ -163,12 +270,12 @@ describe('PostgreSQL upload jobs', () => {
       const firstUpgrade = await migrateDatabase(scopedPool);
       const repeatUpgrade = await migrateDatabase(scopedPool);
       const upgraded = await scopedPool.query(
-        `SELECT upload_id, bucket, object_key, status, upload_expires_at, next_check_at
+        `SELECT upload_id, bucket, object_key, status, upload_expires_at, next_check_at, page_count, error_code
          FROM jobs WHERE upload_id = $1`,
         [uploadId],
       );
 
-      expect(firstUpgrade.applied).toEqual(['002_uploaded_status.sql']);
+      expect(firstUpgrade.applied).toEqual(['002_uploaded_status.sql', '003_extraction_outcomes.sql']);
       expect(repeatUpgrade.applied).toEqual([]);
       expect(upgraded.rows[0]).toEqual({
         upload_id: uploadId,
@@ -177,6 +284,8 @@ describe('PostgreSQL upload jobs', () => {
         status: 'uploaded',
         upload_expires_at: expiry,
         next_check_at: nextCheck,
+        page_count: null,
+        error_code: null,
       });
     } finally {
       await scopedPool.end();

@@ -13,6 +13,8 @@ function job(uploadId: string, overrides: Partial<JobRecord> = {}): JobRecord {
     bucket: 'doc-ai-local-pdfs',
     objectKey: `incoming/${uploadId}.pdf`,
     status: 'awaiting_upload',
+    pageCount: null,
+    errorCode: null,
     uploadExpiresAt: new Date(now.getTime() - 10 * 60_000),
     nextCheckAt: now,
     createdAt: now,
