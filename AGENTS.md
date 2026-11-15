@@ -36,6 +36,10 @@ that and stop; do not silently fall back to another role or model.
 ## Code Readability
 - Write code for readability. Use blank lines to separate distinct logical blocks, and preserve meaningful spacing when editing existing code.
 
+## Git Branches
+- Name branches `<type>/<task>`, choosing the type by the branch's primary purpose (`feat`, `fix`, `chore`, etc.).
+- Use a lowercase, hyphenated task name, such as `feat/single-pdf-ingestion`, `fix/upload-retry`, or `chore/update-tooling`.
+
 ## UI Development
 - When you need information about Mantine UI components, start with https://mantine.dev/llms.txt and follow the relevant documentation links.
 - Group each component with its styles, types, and related hooks in its own folder under `frontend/src/components/`.
