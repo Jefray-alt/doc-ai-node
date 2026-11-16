@@ -135,7 +135,7 @@ they address the launcher's service. `stop floci` stops the service while
 keeping its container and data. `down` stops and removes the container while
 keeping stored objects in the named Compose volume. The
 `doc-ai-node` project name also means a worktree shares that project's Floci and
-PostgreSQL data;
+PostgreSQL data and pgAdmin settings;
 when Compose configuration paths change between worktrees, it may safely
 recreate a container while retaining the named volume.
 
@@ -145,8 +145,8 @@ To stop Floci while keeping the container and its data, run:
 docker compose --project-name doc-ai-node stop floci
 ```
 
-To deliberately clear all local Floci objects and PostgreSQL job records, then
-recreate empty storage, run:
+To deliberately clear all local Floci objects, PostgreSQL job records, and
+pgAdmin settings, then recreate empty storage, run:
 
 ```sh
 docker compose --project-name doc-ai-node down -v
@@ -162,3 +162,36 @@ reconciliation if PostgreSQL is unavailable, while `/health` remains available.
 The root launcher waits for PostgreSQL and runs repeat-safe migrations
 before starting development servers. To apply migrations manually, run
 `npm run db:migrate` from `backend/`.
+
+### Local pgAdmin
+
+pgAdmin is an optional browser interface for PostgreSQL. The npm launcher does
+not start it. To start it manually (and PostgreSQL if needed), run:
+
+```sh
+docker compose --project-name doc-ai-node up -d --wait pgadmin
+```
+
+Open `http://localhost:5050` and log in with `admin@example.com` and
+`pgadmin_dev`. To use different login credentials, set `PGADMIN_DEFAULT_EMAIL`
+and `PGADMIN_DEFAULT_PASSWORD` in the root `.env` before the first startup.
+Changing these variables does not change an account already initialized in the
+existing volume.
+
+In pgAdmin, register a server with a name of your choice and these connection
+settings:
+
+- Host name/address: `postgres` (the Compose service name).
+- Port: `5432`.
+- Maintenance database: the root `.env` value of `POSTGRES_DB` (default `doc_ai`).
+- Username: `POSTGRES_USER` (default `doc_ai`).
+- Password: `POSTGRES_PASSWORD` (default `doc_ai_dev`).
+
+pgAdmin accounts and registered server settings persist in the `pgadmin-data`
+Compose volume. To stop pgAdmin while keeping its settings, run:
+
+```sh
+docker compose --project-name doc-ai-node stop pgadmin
+```
+
+The `down -v` reset above also deletes this volume and its pgAdmin settings.
