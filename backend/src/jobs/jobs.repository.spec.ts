@@ -33,6 +33,8 @@ describe('JobsRepository dependency injection', () => {
       bucket: 'pdfs',
       object_key: 'incoming/oldest.pdf',
       status: 'awaiting_upload',
+      page_count: null,
+      error_code: null,
       upload_expires_at: new Date('2026-01-01T00:00:00.000Z'),
       next_check_at: new Date('2026-01-01T00:00:00.000Z'),
       created_at: new Date('2025-12-31T23:59:00.000Z'),
@@ -45,12 +47,39 @@ describe('JobsRepository dependency injection', () => {
     await expect(repository.findNextDueAwaitingUpload(now)).resolves.toMatchObject({
       uploadId: row.upload_id,
       objectKey: row.object_key,
+      pageCount: null,
+      errorCode: null,
     });
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining('ORDER BY next_check_at, created_at'),
       [now],
     );
     expect(pool.query.mock.calls[0]?.[0]).toContain('LIMIT 1');
+  });
+
+  it.each([
+    { status: 'extracted', page_count: 7, error_code: null },
+    { status: 'failed', page_count: null, error_code: 'INVALID_PDF' },
+    { status: 'uploaded', page_count: null, error_code: 'S3_UNAVAILABLE' },
+  ])('maps persisted extraction fields for $status jobs', async (outcome) => {
+    const row = {
+      upload_id: 'upload-1',
+      bucket: 'pdfs',
+      object_key: 'incoming/document.pdf',
+      upload_expires_at: new Date(),
+      next_check_at: new Date(),
+      created_at: new Date(),
+      updated_at: new Date(),
+      ...outcome,
+    };
+    const pool = { query: vi.fn().mockResolvedValue({ rows: [row] }) };
+    const repository = new JobsRepository(pool as never);
+
+    await expect(repository.findByUploadId(row.upload_id)).resolves.toMatchObject({
+      status: outcome.status,
+      pageCount: outcome.page_count,
+      errorCode: outcome.error_code,
+    });
   });
 
   it('exports the repository without starting reconciliation', async () => {

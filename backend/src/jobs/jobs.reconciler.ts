@@ -1,12 +1,22 @@
 import { HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import type { JobRecord } from './jobs.repository.ts';
-import { JobsRepository } from './jobs.repository.ts';
+import { IngestionService } from '../ingestion/ingestion.service.js';
+import { DownloadTooLargeError } from '../ingestion/pdf-downloader.errors.js';
+import { PdfExtractionError, PdfInputVerificationError, PdfPageLimitError } from '../ingestion/pdf-extractor.errors.js';
+import type { JobRecord } from './jobs.repository.js';
+import { JobsRepository } from './jobs.repository.js';
 
 const CHECK_INTERVAL_MS = 5_000;
 const HEAD_TIMEOUT_MS = 5_000;
 const EXPIRY_GRACE_MS = 10 * 60_000;
+
+function terminalExtractionCode(error: unknown): string | undefined {
+  if (error instanceof PdfInputVerificationError || error instanceof PdfExtractionError) return error.code;
+  if (error instanceof DownloadTooLargeError) return 'PDF_TOO_LARGE';
+  if (error instanceof PdfPageLimitError) return 'PDF_TOO_MANY_PAGES';
+  return undefined;
+}
 
 function isMissingObject(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
@@ -31,10 +41,12 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
   private loopPromise: Promise<void> | undefined;
   private activeCycle: Promise<boolean> | undefined;
   private stopping = false;
+  private preferUploaded = false;
 
   constructor(
     private readonly jobs: JobsRepository,
     private readonly s3: S3Client,
+    private readonly ingestion: IngestionService,
   ) { }
 
   private now(): Date {
@@ -42,7 +54,7 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit(): void {
-    this.logger.log('Starting job poller...')
+    this.logger.log('Starting job poller...');
     this.loopPromise = this.runLoop();
   }
 
@@ -56,13 +68,13 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
 
   async reconcileOnce(): Promise<void> {
     if (this.stopping) return;
-    await this.reconcileOneDueUpload();
+    await this.reconcileOneDueJob();
   }
 
-  private async reconcileOneDueUpload(): Promise<boolean> {
+  private async reconcileOneDueJob(): Promise<boolean> {
     if (this.stopping) return false;
     if (this.activeCycle) return this.activeCycle;
-    const cycle = this.reconcileDueUploads();
+    const cycle = this.reconcileDueJobs();
     this.activeCycle = cycle;
     try {
       return await cycle;
@@ -71,20 +83,61 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async reconcileDueUploads(): Promise<boolean> {
-    let due: JobRecord | null;
+  private async reconcileDueJobs(): Promise<boolean> {
+    const statuses = this.preferUploaded
+      ? ['uploaded', 'awaiting_upload'] as const
+      : ['awaiting_upload', 'uploaded'] as const;
     try {
-      due = await this.jobs.findNextDueAwaitingUpload(this.now());
+      for (const status of statuses) {
+        const due = status === 'uploaded'
+          ? await this.jobs.findNextDueUploaded(this.now())
+          : await this.jobs.findNextDueAwaitingUpload(this.now());
+        if (this.stopping) return false;
+        if (!due) continue;
+
+        // Give the other status first choice next time, even after a failed attempt.
+        this.preferUploaded = status === 'awaiting_upload';
+        return status === 'uploaded' ? this.extractUpload(due) : this.reconcileUpload(due);
+      }
     } catch (error) {
       this.logger.error(
-        'Failed to fetch due uploads for reconciliation',
+        'Failed to fetch due jobs for reconciliation',
         error instanceof Error ? error.stack : String(error),
       );
       return false;
     }
 
-    if (!due || this.stopping) return false;
-    return this.reconcileUpload(due);
+    return false;
+  }
+
+  private async extractUpload(job: JobRecord): Promise<boolean> {
+    let pageCount = 0;
+    try {
+      await this.ingestion.extract(job.bucket, job.objectKey, () => {
+        pageCount += 1;
+      }, this.shutdownController.signal);
+    } catch (error) {
+      if (this.stopping) return false;
+      this.logger.error(
+        `Failed to extract upload ${job.uploadId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      const terminalCode = terminalExtractionCode(error);
+      if (terminalCode) {
+        return this.persist(job.uploadId, () => this.jobs.failExtraction(job.uploadId, terminalCode));
+      }
+      await this.persist(job.uploadId, () => this.jobs.retryExtraction(
+        job.uploadId, 'PDF_PROCESSING_FAILED', new Date(this.now().getTime() + CHECK_INTERVAL_MS),
+      ));
+      return false;
+    }
+
+    if (this.stopping) return false;
+    return this.persist(
+      job.uploadId,
+      () => this.jobs.completeExtraction(job.uploadId, pageCount),
+      `PDF extracted for ${job.uploadId} (uploaded -> extracted, ${pageCount} pages)`,
+    );
   }
 
   private async reconcileUpload(job: JobRecord): Promise<boolean> {
@@ -107,6 +160,7 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    if (this.stopping) return false;
     if (!missing) {
       return this.persist(
         job.uploadId,
@@ -186,7 +240,7 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
 
   private async runLoop(): Promise<void> {
     while (!this.stopping) {
-      const handledSuccessfully = await this.reconcileOneDueUpload();
+      const handledSuccessfully = await this.reconcileOneDueJob();
       if (this.stopping) return;
       if (handledSuccessfully) continue;
       await new Promise<void>((resolve) => {

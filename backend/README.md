@@ -61,8 +61,8 @@ npm start
 HTTP and process-level suites under `test/`.
 `npm run test:floci` exercises the signed PDF POST against the local
 Floci service, then verifies the worker reconciles the uploaded object into
-`uploaded` while a presigned upload with no object stays in
-`awaiting_upload`.
+`extracted` with its page count, rejects invalid PDF input as `failed`, and
+keeps a presigned upload with no object in `awaiting_upload`.
 
 ## Health endpoint
 
@@ -89,25 +89,43 @@ bytes. A successful storage response means the PDF is awaiting validation and
 does not make it available for chat. PostgreSQL and the initial migration must
 be available for this endpoint to issue an authorization.
 
-Run exactly one standalone worker replica in this first version. Its reconciler
-checks one due `awaiting_upload` row at a time, ordered by next check time and
-creation time, using S3 HEAD requests with a five-second request timeout. After
-successful handling it immediately checks the next due row; when none are due
-or an operational check or write fails, it waits five seconds before checking
-again. A present object moves to `uploaded`.
+Run exactly one standalone worker process and replica in this first version.
+Its single polling loop handles one due job at a time, alternating between
+`awaiting_upload` checks and `uploaded` extraction when both have due work.
+Within each status, jobs are ordered by next check time and creation time.
+Upload checks use S3 HEAD requests with a five-second request timeout. After
+successful handling the loop immediately selects the next due job; when none
+are due or an operational check or write fails, it waits five seconds before
+checking again. A present object moves to `uploaded` and becomes eligible for
+extraction.
 Missing objects remain `awaiting_upload` through the ten-minute grace period
 after the upload authorization expires; a final missing-object check after that
 period moves the row to `expired`. Other S3 errors are retried and do not expire
-the upload. `uploaded` confirms only that the S3 object exists. It does not
-validate, extract, embed, ingest, or dispatch the document, and it does not
-delete uploaded objects. Due checks resume from PostgreSQL after a worker
-restart.
+the upload. `uploaded` confirms only that the S3 object exists.
+
+For each uploaded job, the worker calls `IngestionService` and counts every
+physical page, including blank pages. Only full extraction success changes
+the job to `extracted`, saves `page_count`, and clears `error_code`. No page text
+or partial page counts are persisted. Known invalid inputs become `failed`
+with stable codes: `PDF_TOO_LARGE`, `PDF_INVALID_HEADER`, `PDF_TOO_MANY_PAGES`,
+`PDF_MALFORMED`, `PDF_PASSWORD_REQUIRED`, or `PDF_NO_TEXT`. Other operational
+failures retain `uploaded`, save `PDF_PROCESSING_FAILED`, and schedule a retry
+five seconds later. Logs include the original failure and upload ID; stored
+error codes do not contain raw error messages.
+
+An active extraction remains `uploaded` until its final outcome is saved.
+Due work resumes from PostgreSQL after restart, so interrupted attempts or
+failed outcome writes can repeat extraction. There are no processing claims,
+leases, or parallel document workers. Shutdown stops new work and aborts the
+active download, then awaits any parser already running without saving a stale
+outcome. The worker does not delete uploaded objects, embed text, or make
+documents ready for chat.
 
 The default HTTP tests replace the jobs repository and need no running services.
-`npm run test:floci` runs only the real PDF POST flow against the API and
-Floci; it requires an empty, uniquely named disposable PostgreSQL database
-with migrations applied. The test removes the two job rows it creates. Start
-the Compose services, create a disposable database, and apply its migrations
+`npm run test:floci` runs the real PDF POST and worker extraction flow against
+the API and Floci; it requires an empty, uniquely named disposable PostgreSQL
+database with migrations applied. Each case removes the two job rows it creates.
+Start the Compose services, create a disposable database, and apply its migrations
 first. Replace `doc_ai_floci_test` with a unique name for each run:
 
 ```sh
@@ -141,8 +159,8 @@ are delivered with empty text, while a document with no extractable text is
 rejected. PDFs requiring a password and malformed PDFs have distinct extraction
 errors. Encrypted PDFs that open without a password are accepted. OCR is not
 performed. PDF parsing has no hard timeout and cannot be interrupted by the
-optional signal; the signal covers the S3 download only. This callable service
-is not yet connected to the job worker or an HTTP route.
+optional signal; the signal covers the S3 download only. The standalone job
+worker uses this service; no HTTP extraction route is exposed.
 
 ## Backend conventions
 
