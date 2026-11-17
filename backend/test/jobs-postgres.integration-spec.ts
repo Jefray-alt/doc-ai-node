@@ -15,7 +15,7 @@ if (!databaseUrl) {
 }
 
 describe('PostgreSQL upload jobs', () => {
-  const adminPool = new Pool({ connectionString: databaseUrl });
+  const adminPool = new Pool({ connectionString: databaseUrl, query_timeout: 5_000 });
   const repository = new JobsRepository(getDatabasePool());
 
   async function createJob(status: JobStatus, nextCheckAt: Date, createdAt?: Date) {
@@ -74,6 +74,8 @@ describe('PostgreSQL upload jobs', () => {
     expect(created.status).toBe('awaiting_upload');
     expect(created.pageCount).toBeNull();
     expect(created.errorCode).toBeNull();
+    expect(created.claimToken).toBeNull();
+    expect(created.leaseExpiresAt).toBeNull();
 
     const persisted = await repository.findByUploadId(uploadId);
     expect(persisted).toMatchObject({
@@ -82,25 +84,6 @@ describe('PostgreSQL upload jobs', () => {
       objectKey,
       status: 'awaiting_upload',
     });
-
-    const laterId = randomUUID();
-    await repository.create({
-      uploadId: laterId,
-      bucket: 'integration-pdfs',
-      objectKey: `integration/${laterId}.pdf`,
-      status: 'awaiting_upload',
-      uploadExpiresAt: new Date(Date.now() + 60_000),
-      nextCheckAt: new Date(Date.now() - 1_000),
-    });
-    const due = await repository.findNextDueAwaitingUpload(new Date());
-    expect(due?.uploadId).toBe(laterId);
-
-    expect(await repository.retryUploadCheck(uploadId, new Date(Date.now() + 5_000))).toBe(true);
-    expect(await repository.confirmUpload(uploadId)).toBe(true);
-    expect(await repository.retryUploadCheck(uploadId, new Date())).toBe(false);
-    expect(await repository.expireMissingUpload(uploadId)).toBe(false);
-    expect(await repository.confirmUpload(uploadId)).toBe(false);
-    await expect(repository.findByUploadId(uploadId)).resolves.toMatchObject({ status: 'uploaded' });
 
     await expect(
       adminPool.query(
@@ -151,38 +134,21 @@ describe('PostgreSQL upload jobs', () => {
     ).rejects.toMatchObject({ code: '23502' });
   });
 
-  it('selects only uploaded jobs due now, ordered by schedule then creation time', async () => {
-    const now = new Date('2026-01-01T00:00:00.000Z');
-    await expect(repository.findNextDueUploaded(now)).resolves.toBeNull();
-    await createJob('uploaded', new Date(now.getTime() + 1));
-    await createJob('awaiting_upload', new Date(now.getTime() - 30_000));
-    await createJob('expired', new Date(now.getTime() - 30_000));
-    const newer = await createJob('uploaded', new Date(now.getTime() - 10_000), now);
-    const older = await createJob('uploaded', newer.nextCheckAt, new Date(now.getTime() - 1_000));
-    const boundary = await createJob('uploaded', now, new Date(now.getTime() - 20_000));
-
-    await expect(repository.findNextDueUploaded(now)).resolves.toMatchObject({ uploadId: older.uploadId });
-    await repository.failExtraction(older.uploadId, 'INVALID_PDF');
-    await expect(repository.findNextDueUploaded(now)).resolves.toMatchObject({ uploadId: newer.uploadId });
-    await repository.completeExtraction(newer.uploadId, 2);
-    await expect(repository.findNextDueUploaded(now)).resolves.toMatchObject({ uploadId: boundary.uploadId });
-    await repository.completeExtraction(boundary.uploadId, 1);
-    await expect(repository.findNextDueUploaded(now)).resolves.toBeNull();
-  });
-
   it('persists operational retries and clears their error after successful extraction', async () => {
-    const now = new Date('2026-01-01T00:00:00.000Z');
+    const now = new Date(Date.now() - 1_000);
     const job = await createJob('uploaded', now);
-    const retryAt = new Date(now.getTime() + 5_000);
+    const retryAt = new Date(Date.now() + 60_000);
+    const claim = (await repository.claimNextDueUploaded())!;
 
-    expect(await repository.retryExtraction(job.uploadId, 'S3_UNAVAILABLE', retryAt)).toBe(true);
+    expect(await repository.retryExtraction(job.uploadId, claim.claimToken, 'S3_UNAVAILABLE', retryAt)).toBe(true);
     await expect(repository.findByUploadId(job.uploadId)).resolves.toMatchObject({
       status: 'uploaded', pageCount: null, errorCode: 'S3_UNAVAILABLE', nextCheckAt: retryAt,
     });
-    await expect(repository.findNextDueUploaded(now)).resolves.toBeNull();
-    await expect(repository.findNextDueUploaded(retryAt)).resolves.toMatchObject({ uploadId: job.uploadId });
+    await expect(repository.claimNextDueUploaded()).resolves.toBeNull();
+    await adminPool.query('UPDATE jobs SET next_check_at = now() WHERE upload_id = $1', [job.uploadId]);
+    const reclaimed = (await repository.claimNextDueUploaded())!;
 
-    expect(await repository.completeExtraction(job.uploadId, 3)).toBe(true);
+    expect(await repository.completeExtraction(job.uploadId, reclaimed.claimToken, 3)).toBe(true);
     await expect(repository.findByUploadId(job.uploadId)).resolves.toMatchObject({
       status: 'extracted', pageCount: 3, errorCode: null,
     });
@@ -190,37 +156,20 @@ describe('PostgreSQL upload jobs', () => {
 
   it('retains terminal failure codes without a page count', async () => {
     const job = await createJob('uploaded', new Date());
-    await repository.retryExtraction(job.uploadId, 'S3_UNAVAILABLE', new Date(Date.now() + 5_000));
+    const claim = (await repository.claimNextDueUploaded())!;
 
-    expect(await repository.failExtraction(job.uploadId, 'INVALID_PDF')).toBe(true);
+    expect(await repository.failExtraction(job.uploadId, claim.claimToken, 'INVALID_PDF')).toBe(true);
     await expect(repository.findByUploadId(job.uploadId)).resolves.toMatchObject({
       status: 'failed', pageCount: null, errorCode: 'INVALID_PDF',
     });
   });
 
-  it('guards every extraction update against missing jobs and all other statuses', async () => {
-    const now = new Date();
-    const awaiting = await createJob('awaiting_upload', now);
-    const expired = await createJob('expired', now);
-    const extracted = await createJob('uploaded', now);
-    const failed = await createJob('uploaded', now);
-    await repository.completeExtraction(extracted.uploadId, 2);
-    await repository.failExtraction(failed.uploadId, 'ENCRYPTED_PDF');
-
-    for (const uploadId of [awaiting.uploadId, expired.uploadId, extracted.uploadId, failed.uploadId, randomUUID()]) {
-      const before = await repository.findByUploadId(uploadId);
-      expect(await repository.completeExtraction(uploadId, 9)).toBe(false);
-      expect(await repository.failExtraction(uploadId, 'INVALID_PDF')).toBe(false);
-      expect(await repository.retryExtraction(uploadId, 'S3_UNAVAILABLE', new Date(now.getTime() + 5_000))).toBe(false);
-      await expect(repository.findByUploadId(uploadId)).resolves.toEqual(before);
-    }
-  });
-
   it('requires positive physical page counts on extracted jobs only', async () => {
     const job = await createJob('uploaded', new Date());
 
+    const claim = (await repository.claimNextDueUploaded())!;
     for (const pageCount of [0, -1]) {
-      await expect(repository.completeExtraction(job.uploadId, pageCount)).rejects.toMatchObject({ code: '23514' });
+      await expect(repository.completeExtraction(job.uploadId, claim.claimToken, pageCount)).rejects.toMatchObject({ code: '23514' });
     }
     await expect(adminPool.query(
       "UPDATE jobs SET status = 'extracted' WHERE upload_id = $1", [job.uploadId],
@@ -231,6 +180,207 @@ describe('PostgreSQL upload jobs', () => {
     await expect(repository.findByUploadId(job.uploadId)).resolves.toMatchObject({
       status: 'uploaded', pageCount: null,
     });
+  });
+
+  const workStatuses = ['awaiting_upload', 'uploaded'] as const;
+  type WorkStatus = typeof workStatuses[number];
+  const claimNext = (repo: JobsRepository, status: WorkStatus) => status === 'uploaded'
+    ? repo.claimNextDueUploaded() : repo.claimNextDueAwaitingUpload();
+  const dueAt = () => new Date(Date.now() - 10_000);
+  const expireClaim = (uploadId: string) => adminPool.query(
+    "UPDATE jobs SET lease_expires_at = clock_timestamp() - interval '1 second' WHERE upload_id = $1", [uploadId],
+  );
+
+  async function withConnections(run: (left: JobsRepository, right: JobsRepository, lock: () => Promise<void>) => Promise<void>) {
+    const left = await adminPool.connect();
+    const right = await adminPool.connect();
+    try {
+      expect((await left.query('SELECT pg_backend_pid()')).rows[0]).not.toEqual(
+        (await right.query('SELECT pg_backend_pid()')).rows[0],
+      );
+      await run(new JobsRepository(left as never), new JobsRepository(right as never), async () => {
+        await left.query('BEGIN');
+        await left.query('SELECT * FROM jobs ORDER BY next_check_at, created_at, upload_id LIMIT 1 FOR UPDATE');
+      });
+    } finally {
+      await left.query('ROLLBACK');
+      left.release();
+      right.release();
+    }
+  }
+
+  it.each(workStatuses)('allows only one owner competing for one %s row on separate connections', async (status) => {
+    const job = await createJob(status, dueAt());
+    await withConnections(async (left, right) => {
+      const claims = await Promise.all([claimNext(left, status), claimNext(right, status)]);
+      expect(claims.filter(Boolean)).toHaveLength(1);
+      expect(claims.find(Boolean)).toMatchObject({ uploadId: job.uploadId, claimToken: expect.any(String) });
+      const persisted = (await repository.findByUploadId(job.uploadId))!;
+      expect(persisted.claimToken).toBe(claims.find(Boolean)!.claimToken);
+      const { rows } = await adminPool.query(
+        'SELECT extract(epoch FROM (lease_expires_at - clock_timestamp())) AS seconds FROM jobs',
+      );
+      expect(Number(rows[0].seconds)).toBeGreaterThan(115);
+      expect(Number(rows[0].seconds)).toBeLessThanOrEqual(120);
+    });
+  });
+
+  it.each(workStatuses)('claims distinct %s jobs concurrently and skips locked rows', async (status) => {
+    const first = await createJob(status, new Date(Date.now() - 20_000));
+    const second = await createJob(status, dueAt());
+    await withConnections(async (_left, right, lock) => {
+      await lock();
+      const skipped = (await claimNext(right, status))!;
+      expect(skipped.uploadId).toBe(second.uploadId);
+      await repository.releaseClaim(skipped.uploadId, skipped.claimToken, status);
+    });
+    await withConnections(async (left, right) => {
+      const claims = await Promise.all([claimNext(left, status), claimNext(right, status)]);
+      expect(claims.map((claim) => claim!.uploadId).sort()).toEqual([first.uploadId, second.uploadId].sort());
+      expect(new Set(claims.map((claim) => claim!.claimToken)).size).toBe(2);
+    });
+  });
+
+  it.each(workStatuses)('orders due %s work by schedule, creation, and upload ID, excluding future and live claims', async (status) => {
+    await expect(claimNext(repository, status)).resolves.toBeNull();
+    await createJob(status, new Date(Date.now() + 60_000));
+    await createJob(status === 'uploaded' ? 'awaiting_upload' : 'uploaded', dueAt());
+    await createJob('expired', dueAt());
+    const schedule = dueAt();
+    const created = new Date(schedule.getTime() - 10_000);
+    const ties = [await createJob(status, schedule, created), await createJob(status, schedule, created)]
+      .sort((a, b) => a.uploadId.localeCompare(b.uploadId));
+    const laterCreated = await createJob(status, schedule, new Date(created.getTime() + 1));
+    const laterDue = await createJob(status, new Date(schedule.getTime() + 1), new Date(created.getTime() - 1));
+    for (const expected of [...ties, laterCreated, laterDue]) {
+      await expect(claimNext(repository, status)).resolves.toMatchObject({ uploadId: expected.uploadId });
+    }
+    await expect(claimNext(repository, status)).resolves.toBeNull();
+  });
+
+  it.each(workStatuses)('reclaims expired %s ownership with a fresh token', async (status) => {
+    const job = await createJob(status, dueAt());
+    const first = (await claimNext(repository, status))!;
+    await expect(claimNext(repository, status)).resolves.toBeNull();
+    await expireClaim(job.uploadId);
+    const second = (await claimNext(repository, status))!;
+    expect(second.uploadId).toBe(job.uploadId);
+    expect(second.claimToken).not.toBe(first.claimToken);
+    expect(second.leaseExpiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  const retryAt = new Date('2099-01-01T00:00:00Z');
+  const mutations = [
+    {
+      name: 'confirm', status: 'awaiting_upload',
+      run: (id: string, token: string, repo = repository) => repo.confirmUpload(id, token),
+      outcome: { status: 'uploaded' },
+    },
+    {
+      name: 'expire', status: 'awaiting_upload',
+      run: (id: string, token: string, repo = repository) => repo.expireMissingUpload(id, token),
+      outcome: { status: 'expired' },
+    },
+    {
+      name: 'retry upload', status: 'awaiting_upload',
+      run: (id: string, token: string, repo = repository) => repo.retryUploadCheck(id, token, retryAt),
+      outcome: { status: 'awaiting_upload', nextCheckAt: retryAt },
+    },
+    {
+      name: 'complete', status: 'uploaded',
+      run: (id: string, token: string, repo = repository) => repo.completeExtraction(id, token, 3),
+      outcome: { status: 'extracted', pageCount: 3, errorCode: null },
+    },
+    {
+      name: 'fail', status: 'uploaded',
+      run: (id: string, token: string, repo = repository) => repo.failExtraction(id, token, 'PDF_MALFORMED'),
+      outcome: { status: 'failed', errorCode: 'PDF_MALFORMED', pageCount: null },
+    },
+    {
+      name: 'retry extraction', status: 'uploaded',
+      run: (id: string, token: string, repo = repository) => repo.retryExtraction(id, token, 'PDF_PROCESSING_FAILED', retryAt),
+      outcome: { status: 'uploaded', nextCheckAt: retryAt, errorCode: 'PDF_PROCESSING_FAILED' },
+    },
+    ...workStatuses.map((status) => ({
+      name: `release ${status}`, status,
+      run: (id: string, token: string, repo = repository) => repo.releaseClaim(id, token, status),
+      outcome: { status },
+    })),
+  ] as const;
+
+  it.each(mutations)('$name requires matching live ownership and expected status, and clears accepted ownership', async (mutation) => {
+    for (const invalid of ['stale', 'expired', 'wrong-status', 'unclaimed', 'missing']) {
+      const status = invalid === 'wrong-status'
+        ? mutation.status === 'uploaded' ? 'awaiting_upload' : 'uploaded'
+        : mutation.status;
+      const job = await createJob(status, dueAt());
+      const first = (await claimNext(repository, status))!;
+      if (invalid === 'expired' || invalid === 'stale') await expireClaim(job.uploadId);
+      if (invalid === 'stale') await claimNext(repository, status);
+      if (invalid === 'unclaimed') await repository.releaseClaim(job.uploadId, first.claimToken, status);
+      const uploadId = invalid === 'missing' ? randomUUID() : job.uploadId;
+      const before = await repository.findByUploadId(job.uploadId);
+      expect(await mutation.run(uploadId, first.claimToken), invalid).toBe(false);
+      await expect(repository.findByUploadId(job.uploadId)).resolves.toEqual(before);
+      await adminPool.query('DELETE FROM jobs WHERE upload_id = $1', [job.uploadId]);
+    }
+    const job = await createJob(mutation.status, dueAt());
+    const claim = (await claimNext(repository, mutation.status))!;
+    expect(await mutation.run(job.uploadId, claim.claimToken)).toBe(true);
+    await expect(repository.findByUploadId(job.uploadId)).resolves.toMatchObject({
+      ...mutation.outcome, claimToken: null, leaseExpiresAt: null,
+    });
+  });
+
+  it.each(mutations)('$name rechecks live ownership after a row lock wait', async (mutation) => {
+    const job = await createJob(mutation.status, dueAt());
+    const claim = (await claimNext(repository, mutation.status))!;
+    const holder = await adminPool.connect();
+    const writer = await adminPool.connect();
+    const writerPid = (await writer.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+    let outcome: Promise<boolean> | undefined;
+    try {
+      await adminPool.query(
+        "UPDATE jobs SET lease_expires_at = clock_timestamp() + interval '1 second' WHERE upload_id = $1",
+        [job.uploadId],
+      );
+      const before = await repository.findByUploadId(job.uploadId);
+      await holder.query('BEGIN');
+      await holder.query('SELECT upload_id FROM jobs WHERE upload_id = $1 FOR UPDATE', [job.uploadId]);
+      outcome = mutation.run(job.uploadId, claim.claimToken, new JobsRepository(writer as never));
+      await expect.poll(async () => {
+        const result = await adminPool.query(
+          'SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1', [writerPid],
+        );
+        return result.rows[0]?.wait_event_type;
+      }).toBe('Lock');
+      // Wait only for the explicitly shortened database lease, with the writer already blocked.
+      // Do not update this row: that would force an EPQ recheck and hide the lock-only race.
+      await holder.query(
+        `SELECT pg_sleep(GREATEST(0, extract(epoch FROM (lease_expires_at - clock_timestamp()))) + 0.05)
+         FROM jobs WHERE upload_id = $1`, [job.uploadId],
+      );
+      await holder.query('COMMIT');
+      expect(await outcome).toBe(false);
+      await expect(repository.findByUploadId(job.uploadId)).resolves.toEqual(before);
+    } finally {
+      await holder.query('ROLLBACK');
+      await outcome?.catch(() => undefined);
+      holder.release();
+      writer.release();
+    }
+  });
+
+  it('enforces paired ownership fields and forbids terminal claims', async () => {
+    const job = await createJob('awaiting_upload', dueAt());
+    for (const assignment of [
+      `claim_token = '${randomUUID()}'`,
+      "lease_expires_at = now() + interval '2 minutes'",
+      `status = 'expired', claim_token = '${randomUUID()}', lease_expires_at = now() + interval '2 minutes'`,
+    ]) {
+      await expect(adminPool.query(`UPDATE jobs SET ${assignment} WHERE upload_id = $1`, [job.uploadId]))
+        .rejects.toMatchObject({ code: '23514' });
+    }
   });
 
   it('upgrades a persisted legacy pending_dispatch row without changing its identity or data', async () => {
@@ -270,12 +420,12 @@ describe('PostgreSQL upload jobs', () => {
       const firstUpgrade = await migrateDatabase(scopedPool);
       const repeatUpgrade = await migrateDatabase(scopedPool);
       const upgraded = await scopedPool.query(
-        `SELECT upload_id, bucket, object_key, status, upload_expires_at, next_check_at, page_count, error_code
+        `SELECT upload_id, bucket, object_key, status, upload_expires_at, next_check_at, page_count, error_code, claim_token, lease_expires_at
          FROM jobs WHERE upload_id = $1`,
         [uploadId],
       );
 
-      expect(firstUpgrade.applied).toEqual(['002_uploaded_status.sql', '003_extraction_outcomes.sql']);
+      expect(firstUpgrade.applied).toEqual(['002_uploaded_status.sql', '003_extraction_outcomes.sql', '004_job_claims.sql']);
       expect(repeatUpgrade.applied).toEqual([]);
       expect(upgraded.rows[0]).toEqual({
         upload_id: uploadId,
@@ -286,6 +436,8 @@ describe('PostgreSQL upload jobs', () => {
         next_check_at: nextCheck,
         page_count: null,
         error_code: null,
+        claim_token: null,
+        lease_expires_at: null,
       });
     } finally {
       await scopedPool.end();

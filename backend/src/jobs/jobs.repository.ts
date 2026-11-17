@@ -1,7 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE_POOL } from '../database/database.module.ts';
 
+export const JOB_LEASE_MS = 2 * 60_000;
+
+export type ClaimableJobStatus = 'awaiting_upload' | 'uploaded';
 export type JobStatus = 'awaiting_upload' | 'uploaded' | 'expired' | 'extracted' | 'failed';
 
 export interface JobRecord {
@@ -11,10 +15,18 @@ export interface JobRecord {
   status: JobStatus;
   pageCount: number | null;
   errorCode: string | null;
+  claimToken: string | null;
+  leaseExpiresAt: Date | null;
   uploadExpiresAt: Date;
   nextCheckAt: Date;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface ClaimedJobRecord extends JobRecord {
+  status: ClaimableJobStatus;
+  claimToken: string;
+  leaseExpiresAt: Date;
 }
 
 export interface CreateJobInput {
@@ -33,6 +45,8 @@ interface JobRow {
   status: JobStatus;
   page_count: number | null;
   error_code: string | null;
+  claim_token: string | null;
+  lease_expires_at: Date | null;
   upload_expires_at: Date;
   next_check_at: Date;
   created_at: Date;
@@ -47,6 +61,8 @@ function toJobRecord(row: JobRow): JobRecord {
     status: row.status,
     pageCount: row.page_count,
     errorCode: row.error_code,
+    claimToken: row.claim_token,
+    leaseExpiresAt: row.lease_expires_at,
     uploadExpiresAt: row.upload_expires_at,
     nextCheckAt: row.next_check_at,
     createdAt: row.created_at,
@@ -87,89 +103,95 @@ export class JobsRepository {
     return row ? toJobRecord(row) : null;
   }
 
-  async findNextDueAwaitingUpload(now: Date): Promise<JobRecord | null> {
+  claimNextDueAwaitingUpload(): Promise<ClaimedJobRecord | null> {
+    return this.claimNextDue('awaiting_upload');
+  }
+
+  claimNextDueUploaded(): Promise<ClaimedJobRecord | null> {
+    return this.claimNextDue('uploaded');
+  }
+
+  private async claimNextDue(status: ClaimableJobStatus): Promise<ClaimedJobRecord | null> {
     const result = await this.pool.query<JobRow>(
-      `SELECT * FROM jobs
-       WHERE status = 'awaiting_upload' AND next_check_at <= $1
-       ORDER BY next_check_at, created_at
-       LIMIT 1`,
-      [now],
+      `WITH candidate AS (
+         SELECT upload_id FROM jobs
+         WHERE status = $1 AND next_check_at <= statement_timestamp()
+           AND (claim_token IS NULL OR lease_expires_at <= clock_timestamp())
+         ORDER BY next_check_at, created_at, upload_id
+         LIMIT 1
+         FOR UPDATE SKIP LOCKED
+       )
+       UPDATE jobs AS job
+       SET claim_token = $2, lease_expires_at = clock_timestamp() + $3 * interval '1 millisecond',
+           updated_at = clock_timestamp()
+       FROM candidate
+       WHERE job.upload_id = candidate.upload_id
+       RETURNING job.*`,
+      [status, randomUUID(), JOB_LEASE_MS],
     );
 
     const row = result.rows[0];
-    return row ? toJobRecord(row) : null;
+    // The claim update and database constraints guarantee non-null ownership.
+    return row ? toJobRecord(row) as ClaimedJobRecord : null;
   }
 
-  async confirmUpload(uploadId: string): Promise<boolean> {
+  confirmUpload(uploadId: string, claimToken: string): Promise<boolean> {
+    return this.updateClaim(uploadId, claimToken, 'awaiting_upload', ["status = 'uploaded'"]);
+  }
+
+  retryUploadCheck(uploadId: string, claimToken: string, nextCheckAt: Date): Promise<boolean> {
+    return this.updateClaim(uploadId, claimToken, 'awaiting_upload', ['next_check_at = $4'], [nextCheckAt]);
+  }
+
+  expireMissingUpload(uploadId: string, claimToken: string): Promise<boolean> {
+    return this.updateClaim(uploadId, claimToken, 'awaiting_upload', ["status = 'expired'"]);
+  }
+
+  completeExtraction(uploadId: string, claimToken: string, pageCount: number): Promise<boolean> {
+    return this.updateClaim(uploadId, claimToken, 'uploaded', [
+      "status = 'extracted'", 'page_count = $4', 'error_code = NULL',
+    ], [pageCount]);
+  }
+
+  failExtraction(uploadId: string, claimToken: string, errorCode: string): Promise<boolean> {
+    return this.updateClaim(uploadId, claimToken, 'uploaded', [
+      "status = 'failed'", 'page_count = NULL', 'error_code = $4',
+    ], [errorCode]);
+  }
+
+  retryExtraction(uploadId: string, claimToken: string, errorCode: string, nextCheckAt: Date): Promise<boolean> {
+    return this.updateClaim(uploadId, claimToken, 'uploaded', [
+      'error_code = $4', 'next_check_at = $5',
+    ], [errorCode, nextCheckAt]);
+  }
+
+  releaseClaim(uploadId: string, claimToken: string, expectedStatus: ClaimableJobStatus): Promise<boolean> {
+    return this.updateClaim(uploadId, claimToken, expectedStatus);
+  }
+
+  private async updateClaim(
+    uploadId: string,
+    claimToken: string,
+    expectedStatus: ClaimableJobStatus,
+    changes: string[] = [],
+    values: unknown[] = [],
+  ): Promise<boolean> {
+    // Lock first: a predicate on UPDATE alone can be evaluated before a lock wait.
+    // Materialization makes the ownership and current-time check happen afterward.
     const result = await this.pool.query(
-      `UPDATE jobs SET status = 'uploaded', updated_at = now()
-       WHERE upload_id = $1 AND status = 'awaiting_upload'`,
-      [uploadId],
-    );
-
-    return result.rowCount === 1;
-  }
-
-  async retryUploadCheck(uploadId: string, nextCheckAt: Date): Promise<boolean> {
-    const result = await this.pool.query(
-      `UPDATE jobs SET next_check_at = $2, updated_at = now()
-       WHERE upload_id = $1 AND status = 'awaiting_upload'`,
-      [uploadId, nextCheckAt],
-    );
-
-    return result.rowCount === 1;
-  }
-
-  async expireMissingUpload(uploadId: string): Promise<boolean> {
-    const result = await this.pool.query(
-      `UPDATE jobs SET status = 'expired', updated_at = now()
-       WHERE upload_id = $1 AND status = 'awaiting_upload'`,
-      [uploadId],
-    );
-
-    return result.rowCount === 1;
-  }
-
-  async findNextDueUploaded(now: Date): Promise<JobRecord | null> {
-    const result = await this.pool.query<JobRow>(
-      `SELECT * FROM jobs
-       WHERE status = 'uploaded' AND next_check_at <= $1
-       ORDER BY next_check_at, created_at
-       LIMIT 1`,
-      [now],
-    );
-
-    const row = result.rows[0];
-    return row ? toJobRecord(row) : null;
-  }
-
-  async completeExtraction(uploadId: string, pageCount: number): Promise<boolean> {
-    const result = await this.pool.query(
-      `UPDATE jobs
-       SET status = 'extracted', page_count = $2, error_code = NULL, updated_at = now()
-       WHERE upload_id = $1 AND status = 'uploaded'`,
-      [uploadId, pageCount],
-    );
-
-    return result.rowCount === 1;
-  }
-
-  async failExtraction(uploadId: string, errorCode: string): Promise<boolean> {
-    const result = await this.pool.query(
-      `UPDATE jobs
-       SET status = 'failed', page_count = NULL, error_code = $2, updated_at = now()
-       WHERE upload_id = $1 AND status = 'uploaded'`,
-      [uploadId, errorCode],
-    );
-
-    return result.rowCount === 1;
-  }
-
-  async retryExtraction(uploadId: string, errorCode: string, nextCheckAt: Date): Promise<boolean> {
-    const result = await this.pool.query(
-      `UPDATE jobs SET error_code = $2, next_check_at = $3, updated_at = now()
-       WHERE upload_id = $1 AND status = 'uploaded'`,
-      [uploadId, errorCode, nextCheckAt],
+      `WITH locked AS MATERIALIZED (
+         SELECT upload_id, claim_token, status, lease_expires_at FROM jobs
+         WHERE upload_id = $1
+         FOR UPDATE
+       )
+       UPDATE jobs SET ${[
+         ...changes, 'claim_token = NULL', 'lease_expires_at = NULL', 'updated_at = clock_timestamp()',
+       ].join(', ')}
+       WHERE upload_id = (
+         SELECT upload_id FROM locked
+         WHERE claim_token = $2 AND status = $3 AND lease_expires_at > clock_timestamp()
+       )`,
+      [uploadId, claimToken, expectedStatus, ...values],
     );
 
     return result.rowCount === 1;

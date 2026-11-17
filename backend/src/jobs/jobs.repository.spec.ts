@@ -27,12 +27,14 @@ describe('JobsRepository dependency injection', () => {
     await moduleRef.close();
   });
 
-  it('queries only the oldest due upload and returns it as one job', async () => {
+  it('atomically claims one due upload and maps its ownership', async () => {
     const row = {
       upload_id: 'f73d16da-c995-451c-849b-6401a5c89157',
       bucket: 'pdfs',
       object_key: 'incoming/oldest.pdf',
       status: 'awaiting_upload',
+      claim_token: '599e095b-b4ab-48a7-aacd-4571eebacbd4',
+      lease_expires_at: new Date('2026-01-01T00:02:00.000Z'),
       page_count: null,
       error_code: null,
       upload_expires_at: new Date('2026-01-01T00:00:00.000Z'),
@@ -42,19 +44,20 @@ describe('JobsRepository dependency injection', () => {
     };
     const pool = { query: vi.fn().mockResolvedValue({ rows: [row] }) };
     const repository = new JobsRepository(pool as never);
-    const now = new Date('2026-01-01T00:00:00.000Z');
 
-    await expect(repository.findNextDueAwaitingUpload(now)).resolves.toMatchObject({
+    await expect(repository.claimNextDueAwaitingUpload()).resolves.toMatchObject({
       uploadId: row.upload_id,
       objectKey: row.object_key,
+      claimToken: row.claim_token,
+      leaseExpiresAt: row.lease_expires_at,
       pageCount: null,
       errorCode: null,
     });
     expect(pool.query).toHaveBeenCalledWith(
-      expect.stringContaining('ORDER BY next_check_at, created_at'),
-      [now],
+      expect.stringContaining('FOR UPDATE SKIP LOCKED'),
+      ['awaiting_upload', expect.any(String), 120_000],
     );
-    expect(pool.query.mock.calls[0]?.[0]).toContain('LIMIT 1');
+    expect(pool.query.mock.calls[0]?.[0]).toContain('ORDER BY next_check_at, created_at, upload_id');
   });
 
   it.each([
@@ -66,6 +69,8 @@ describe('JobsRepository dependency injection', () => {
       upload_id: 'upload-1',
       bucket: 'pdfs',
       object_key: 'incoming/document.pdf',
+      claim_token: null,
+      lease_expires_at: null,
       upload_expires_at: new Date(),
       next_check_at: new Date(),
       created_at: new Date(),

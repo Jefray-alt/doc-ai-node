@@ -10,13 +10,15 @@ const now = new Date('2026-01-01T00:00:00.000Z');
 const uploaded: JobRecord = {
   uploadId: 'uploaded', bucket: 'pdfs', objectKey: 'incoming/document.pdf',
   status: 'uploaded', pageCount: null, errorCode: null,
+  claimToken: 'owner-token', leaseExpiresAt: new Date(now.getTime() + 120_000),
   uploadExpiresAt: now, nextCheckAt: now, createdAt: now, updatedAt: now,
 };
 
 function setup() {
   const jobs = {
-    findNextDueAwaitingUpload: vi.fn().mockResolvedValue(null),
-    findNextDueUploaded: vi.fn().mockResolvedValue(uploaded),
+    claimNextDueAwaitingUpload: vi.fn().mockResolvedValue(null),
+    claimNextDueUploaded: vi.fn().mockResolvedValue(uploaded),
+    releaseClaim: vi.fn().mockResolvedValue(true),
     confirmUpload: vi.fn().mockResolvedValue(true),
     completeExtraction: vi.fn().mockResolvedValue(true),
     failExtraction: vi.fn().mockResolvedValue(true),
@@ -58,9 +60,9 @@ describe('JobsReconciler PDF ingestion', () => {
 
     await reconciler.reconcileOnce();
 
-    expect(jobs.findNextDueUploaded).toHaveBeenCalledWith(now);
+    expect(jobs.claimNextDueUploaded).toHaveBeenCalledWith();
     expect(ingestion.extract).toHaveBeenCalledWith('pdfs', 'incoming/document.pdf', expect.any(Function), expect.any(AbortSignal));
-    expect(jobs.completeExtraction).toHaveBeenCalledExactlyOnceWith('uploaded', 3);
+    expect(jobs.completeExtraction).toHaveBeenCalledExactlyOnceWith('uploaded', 'owner-token', 3);
     expect(jobs.failExtraction).not.toHaveBeenCalled();
     expect(jobs.retryExtraction).not.toHaveBeenCalled();
   });
@@ -82,7 +84,7 @@ describe('JobsReconciler PDF ingestion', () => {
 
     await reconciler.reconcileOnce();
 
-    expect(jobs.failExtraction).toHaveBeenCalledExactlyOnceWith('uploaded', code);
+    expect(jobs.failExtraction).toHaveBeenCalledExactlyOnceWith('uploaded', 'owner-token', code);
     expect(jobs.completeExtraction).not.toHaveBeenCalled();
     expect(jobs.retryExtraction).not.toHaveBeenCalled();
     expect(Logger.prototype.error).toHaveBeenCalledWith('Failed to extract upload uploaded', error.stack);
@@ -98,7 +100,7 @@ describe('JobsReconciler PDF ingestion', () => {
 
     await reconciler.reconcileOnce();
 
-    expect(jobs.retryExtraction).toHaveBeenCalledExactlyOnceWith('uploaded', 'PDF_PROCESSING_FAILED', new Date(now.getTime() + 5_000));
+    expect(jobs.retryExtraction).toHaveBeenCalledExactlyOnceWith('uploaded', 'owner-token', 'PDF_PROCESSING_FAILED', new Date(now.getTime() + 5_000));
     expect(jobs.completeExtraction).not.toHaveBeenCalled();
     expect(jobs.failExtraction).not.toHaveBeenCalled();
     expect(Logger.prototype.error).toHaveBeenCalledWith('Failed to extract upload uploaded', error.stack);
@@ -143,19 +145,19 @@ describe('JobsReconciler PDF ingestion', () => {
 
   it('drains successful extraction jobs immediately and recovers an uploaded job after restart', async () => {
     const { jobs, ingestion, reconciler } = setup();
-    jobs.findNextDueUploaded.mockResolvedValueOnce(uploaded).mockResolvedValueOnce({ ...uploaded, uploadId: 'second' }).mockResolvedValue(null);
+    jobs.claimNextDueUploaded.mockResolvedValueOnce(uploaded).mockResolvedValueOnce({ ...uploaded, uploadId: 'second' }).mockResolvedValue(null);
     jobs.completeExtraction.mockResolvedValueOnce(false).mockResolvedValue(true);
     await reconciler.reconcileOnce();
-    expect(jobs.completeExtraction).toHaveBeenCalledWith('uploaded', 3);
+    expect(jobs.completeExtraction).toHaveBeenCalledWith('uploaded', 'owner-token', 3);
     await reconciler.onModuleDestroy();
 
-    // A failed outcome write leaves the original uploaded row eligible in storage.
-    jobs.findNextDueUploaded.mockReset().mockResolvedValueOnce(uploaded).mockResolvedValueOnce({ ...uploaded, uploadId: 'second' }).mockResolvedValue(null);
+    // After lease expiry a restarted worker can reclaim the original uploaded row.
+    jobs.claimNextDueUploaded.mockReset().mockResolvedValueOnce(uploaded).mockResolvedValueOnce({ ...uploaded, uploadId: 'second' }).mockResolvedValue(null);
     const restarted = new JobsReconciler(jobs as never, {} as never, ingestion as never);
     restarted.onModuleInit();
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(jobs.completeExtraction.mock.calls).toEqual([['uploaded', 3], ['uploaded', 3], ['second', 3]]);
+    expect(jobs.completeExtraction.mock.calls).toEqual([['uploaded', 'owner-token', 3], ['uploaded', 'owner-token', 3], ['second', 'owner-token', 3]]);
     await restarted.onModuleDestroy();
   });
 
@@ -167,7 +169,7 @@ describe('JobsReconciler PDF ingestion', () => {
     await vi.advanceTimersByTimeAsync(0);
     const second = reconciler.reconcileOnce();
     expect(ingestion.extract).toHaveBeenCalledOnce();
-    expect(jobs.findNextDueUploaded).toHaveBeenCalledOnce();
+    expect(jobs.claimNextDueUploaded).toHaveBeenCalledOnce();
     finish();
     await Promise.all([first, second]);
     expect(jobs.completeExtraction).toHaveBeenCalledOnce();
@@ -175,7 +177,7 @@ describe('JobsReconciler PDF ingestion', () => {
 
   it('alternates due upload checks and extraction when both queues remain busy', async () => {
     const { jobs, ingestion, s3, reconciler } = setup();
-    jobs.findNextDueAwaitingUpload.mockResolvedValue({ ...uploaded, status: 'awaiting_upload' });
+    jobs.claimNextDueAwaitingUpload.mockResolvedValue({ ...uploaded, status: 'awaiting_upload' });
 
     for (let index = 0; index < 6; index++) {
       await reconciler.reconcileOnce();
@@ -188,12 +190,12 @@ describe('JobsReconciler PDF ingestion', () => {
 
   it('backs off a failed uploaded lookup and retries it on the next cycle', async () => {
     const { jobs, reconciler } = setup();
-    jobs.findNextDueUploaded.mockRejectedValueOnce(new Error('database unavailable')).mockResolvedValue(null);
+    jobs.claimNextDueUploaded.mockRejectedValueOnce(new Error('database unavailable')).mockResolvedValue(null);
     reconciler.onModuleInit();
     await vi.advanceTimersByTimeAsync(4_999);
-    expect(jobs.findNextDueUploaded).toHaveBeenCalledOnce();
+    expect(jobs.claimNextDueUploaded).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(1);
-    expect(jobs.findNextDueUploaded).toHaveBeenCalledTimes(2);
+    expect(jobs.claimNextDueUploaded).toHaveBeenCalledTimes(2);
     await reconciler.onModuleDestroy();
   });
 
@@ -233,10 +235,12 @@ describe('JobsReconciler PDF ingestion', () => {
     const shutdown = reconciler.onModuleDestroy().then(() => { closed = true; });
     await vi.advanceTimersByTimeAsync(0);
     expect(closed).toBe(false);
+    expect(jobs.releaseClaim).not.toHaveBeenCalled();
     finish();
     await Promise.all([cycle, shutdown]);
 
     expect(closed).toBe(true);
+    expect(jobs.releaseClaim).toHaveBeenCalledExactlyOnceWith('uploaded', 'owner-token', 'uploaded');
     expect(jobs.completeExtraction).not.toHaveBeenCalled();
     expect(jobs.failExtraction).not.toHaveBeenCalled();
     expect(jobs.retryExtraction).not.toHaveBeenCalled();

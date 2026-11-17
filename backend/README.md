@@ -92,7 +92,8 @@ be available for this endpoint to issue an authorization.
 Run exactly one standalone worker process and replica in this first version.
 Its single polling loop handles one due job at a time, alternating between
 `awaiting_upload` checks and `uploaded` extraction when both have due work.
-Within each status, jobs are ordered by next check time and creation time.
+Within each status, jobs are ordered by next check time, creation time, then
+upload ID as a deterministic tie-breaker. Locked or actively leased jobs are skipped.
 Upload checks use S3 HEAD requests with a five-second request timeout. After
 successful handling the loop immediately selects the next due job; when none
 are due or an operational check or write fails, it waits five seconds before
@@ -113,13 +114,25 @@ failures retain `uploaded`, save `PDF_PROCESSING_FAILED`, and schedule a retry
 five seconds later. Logs include the original failure and upload ID; stored
 error codes do not contain raw error messages.
 
-An active extraction remains `uploaded` until its final outcome is saved.
-Due work resumes from PostgreSQL after restart, so interrupted attempts or
-failed outcome writes can repeat extraction. There are no processing claims,
-leases, or parallel document workers. Shutdown stops new work and aborts the
-active download, then awaits any parser already running without saving a stale
-outcome. The worker does not delete uploaded objects, embed text, or make
-documents ready for chat.
+Each upload check or extraction atomically acquires a fresh ownership token and
+fixed two-minute lease, measured by PostgreSQL time. Every outcome or retry
+requires that token, the expected status, and a live lease; accepted writes clear
+ownership. An active extraction remains `uploaded` until its final outcome is saved.
+Abandoned claims become eligible again after expiry, so interrupted attempts or
+failed outcome writes can repeat computation. There is no lease renewal yet:
+work lasting over two minutes loses ownership and its outcome is discarded.
+Keep exactly one worker process and replica until lease renewal and the full
+recovery lifecycle are implemented and verified.
+
+Shutdown stops new work and aborts the active download, then awaits any parser
+already running without saving its outcome. It best-effort releases an unused
+live claim; failed releases and uncertain outcome writes recover through expiry.
+PDF parsing cannot be forcibly interrupted and has no hard deadline. The worker
+does not delete uploaded objects, embed text, or make documents ready for chat.
+
+Before deploying this migration, stop all old workers, apply migrations, then
+start only the new worker version. Mixed versions are unsupported because old
+workers do not honor ownership tokens or leases.
 
 The default HTTP tests replace the jobs repository and need no running services.
 `npm run test:floci` runs the real PDF POST and worker extraction flow against

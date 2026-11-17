@@ -4,12 +4,17 @@ import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { IngestionService } from '../ingestion/ingestion.service.js';
 import { DownloadTooLargeError } from '../ingestion/pdf-downloader.errors.js';
 import { PdfExtractionError, PdfInputVerificationError, PdfPageLimitError } from '../ingestion/pdf-extractor.errors.js';
-import type { JobRecord } from './jobs.repository.js';
+import type { ClaimedJobRecord, ClaimableJobStatus, JobRecord } from './jobs.repository.js';
 import { JobsRepository } from './jobs.repository.js';
 
 const CHECK_INTERVAL_MS = 5_000;
 const HEAD_TIMEOUT_MS = 5_000;
 const EXPIRY_GRACE_MS = 10 * 60_000;
+
+interface JobAttempt {
+  job: ClaimedJobRecord;
+  outcomeStarted: boolean;
+}
 
 function terminalExtractionCode(error: unknown): string | undefined {
   if (error instanceof PdfInputVerificationError || error instanceof PdfExtractionError) return error.code;
@@ -90,14 +95,24 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
     try {
       for (const status of statuses) {
         const due = status === 'uploaded'
-          ? await this.jobs.findNextDueUploaded(this.now())
-          : await this.jobs.findNextDueAwaitingUpload(this.now());
-        if (this.stopping) return false;
-        if (!due) continue;
+          ? await this.jobs.claimNextDueUploaded()
+          : await this.jobs.claimNextDueAwaitingUpload();
+        if (!due) {
+          if (this.stopping) return false;
+          continue;
+        }
 
-        // Give the other status first choice next time, even after a failed attempt.
-        this.preferUploaded = status === 'awaiting_upload';
-        return status === 'uploaded' ? this.extractUpload(due) : this.reconcileUpload(due);
+        const attempt: JobAttempt = { job: due, outcomeStarted: false };
+        try {
+          if (this.stopping) return false;
+          // Give the other status first choice next time, even after a failed attempt.
+          this.preferUploaded = status === 'awaiting_upload';
+          return await (status === 'uploaded' ? this.extractUpload(attempt) : this.reconcileUpload(attempt));
+        } finally {
+          // An issued outcome may have committed even if its response was lost.
+          // Leave uncertain writes to lease expiry rather than releasing them.
+          if (this.stopping && !attempt.outcomeStarted) await this.releaseClaim(due, status);
+        }
       }
     } catch (error) {
       this.logger.error(
@@ -110,7 +125,8 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
     return false;
   }
 
-  private async extractUpload(job: JobRecord): Promise<boolean> {
+  private async extractUpload(attempt: JobAttempt): Promise<boolean> {
+    const { job } = attempt;
     let pageCount = 0;
     try {
       await this.ingestion.extract(job.bucket, job.objectKey, () => {
@@ -124,23 +140,24 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
       );
       const terminalCode = terminalExtractionCode(error);
       if (terminalCode) {
-        return this.persist(job.uploadId, () => this.jobs.failExtraction(job.uploadId, terminalCode));
+        return this.persist(attempt, () => this.jobs.failExtraction(job.uploadId, job.claimToken, terminalCode));
       }
-      await this.persist(job.uploadId, () => this.jobs.retryExtraction(
-        job.uploadId, 'PDF_PROCESSING_FAILED', new Date(this.now().getTime() + CHECK_INTERVAL_MS),
+      await this.persist(attempt, () => this.jobs.retryExtraction(
+        job.uploadId, job.claimToken, 'PDF_PROCESSING_FAILED', new Date(this.now().getTime() + CHECK_INTERVAL_MS),
       ));
       return false;
     }
 
     if (this.stopping) return false;
     return this.persist(
-      job.uploadId,
-      () => this.jobs.completeExtraction(job.uploadId, pageCount),
+      attempt,
+      () => this.jobs.completeExtraction(job.uploadId, job.claimToken, pageCount),
       `PDF extracted for ${job.uploadId} (uploaded -> extracted, ${pageCount} pages)`,
     );
   }
 
-  private async reconcileUpload(job: JobRecord): Promise<boolean> {
+  private async reconcileUpload(attempt: JobAttempt): Promise<boolean> {
+    const { job } = attempt;
     let missing = false;
     try {
       await this.sendHeadObject(job);
@@ -153,8 +170,8 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
           `Failed to check upload ${job.uploadId}`,
           error instanceof Error ? error.stack : String(error),
         );
-        await this.persist(job.uploadId, () =>
-          this.jobs.retryUploadCheck(job.uploadId, new Date(this.now().getTime() + CHECK_INTERVAL_MS)),
+        await this.persist(attempt, () =>
+          this.jobs.retryUploadCheck(job.uploadId, job.claimToken, new Date(this.now().getTime() + CHECK_INTERVAL_MS)),
         );
         return false;
       }
@@ -163,8 +180,8 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
     if (this.stopping) return false;
     if (!missing) {
       return this.persist(
-        job.uploadId,
-        () => this.jobs.confirmUpload(job.uploadId),
+        attempt,
+        () => this.jobs.confirmUpload(job.uploadId, job.claimToken),
         `Upload confirmed for ${job.uploadId} (awaiting_upload -> uploaded)`,
       );
     }
@@ -172,14 +189,14 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
     const graceEndsAt = job.uploadExpiresAt.getTime() + EXPIRY_GRACE_MS;
     if (this.now().getTime() > graceEndsAt) {
       return this.persist(
-        job.uploadId,
-        () => this.jobs.expireMissingUpload(job.uploadId),
+        attempt,
+        () => this.jobs.expireMissingUpload(job.uploadId, job.claimToken),
         `Upload expired for ${job.uploadId} (awaiting_upload -> expired)`,
       );
     }
 
-    return this.persist(job.uploadId, () =>
-      this.jobs.retryUploadCheck(job.uploadId, new Date(this.now().getTime() + CHECK_INTERVAL_MS)),
+    return this.persist(attempt, () =>
+      this.jobs.retryUploadCheck(job.uploadId, job.claimToken, new Date(this.now().getTime() + CHECK_INTERVAL_MS)),
     );
   }
 
@@ -221,20 +238,33 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
   }
 
   private async persist(
-    uploadId: string,
+    attempt: JobAttempt,
     update: () => Promise<boolean>,
     successMessage?: string,
   ): Promise<boolean> {
+    if (this.stopping) return false;
+    attempt.outcomeStarted = true;
     try {
       const updated = await update();
       if (updated && successMessage) this.logger.log(successMessage);
       return updated;
     } catch (error) {
       this.logger.error(
-        `Failed to persist reconciliation for upload ${uploadId}`,
+        `Failed to persist reconciliation for upload ${attempt.job.uploadId}`,
         error instanceof Error ? error.stack : String(error),
       );
       return false;
+    }
+  }
+
+  private async releaseClaim(job: ClaimedJobRecord, status: ClaimableJobStatus): Promise<void> {
+    try {
+      await this.jobs.releaseClaim(job.uploadId, job.claimToken, status);
+    } catch (error) {
+      this.logger.error(
+        `Failed to release claim for upload ${job.uploadId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
     }
   }
 

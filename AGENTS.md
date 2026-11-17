@@ -4,6 +4,12 @@
 - docs/product-brief.md: Product goals and MVP scope
 - docs/feature-backlog.md: Candidate features and priorities
 - docs/roadmap.md: Implementation sequence and status
+- docs/plan/<task>.md: Lightweight requirements, design decisions, and ordered implementation tasks for the current work
+
+Always document each implementation plan in a Markdown file under `docs/plan/`
+during planning, before implementation begins. Use a descriptive, lowercase,
+hyphenated filename. Update the same file as decisions, scope, or task status
+change; keep detailed requirements there instead of duplicating them elsewhere.
 
 ## Workflow
 1. Start with product discovery for new projects.
