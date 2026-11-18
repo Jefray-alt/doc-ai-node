@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -369,6 +370,193 @@ describe('PostgreSQL upload jobs', () => {
       holder.release();
       writer.release();
     }
+  });
+
+  it.each(workStatuses)('renews only the live matching %s claim and preserves its work fields', async (status) => {
+    const job = await createJob(status, dueAt());
+    const claim = (await claimNext(repository, status))!;
+    await adminPool.query(
+      "UPDATE jobs SET lease_expires_at = clock_timestamp() + interval '20 seconds' WHERE upload_id = $1",
+      [job.uploadId],
+    );
+    const before = (await repository.findByUploadId(job.uploadId))!;
+    expect(await repository.renewClaim(job.uploadId, claim.claimToken, status)).toBe(true);
+    const after = (await repository.findByUploadId(job.uploadId))!;
+    expect(after).toEqual({ ...before, leaseExpiresAt: expect.any(Date) });
+    expect(after.leaseExpiresAt!.getTime()).toBeGreaterThan(before.leaseExpiresAt!.getTime() + 90_000);
+    for (const invalid of ['wrong-token', 'wrong-status', 'expired', 'reclaimed']) {
+      if (invalid === 'expired' || invalid === 'reclaimed') await expireClaim(job.uploadId);
+      if (invalid === 'reclaimed') await claimNext(repository, status);
+      const saved = await repository.findByUploadId(job.uploadId);
+      expect(await repository.renewClaim(job.uploadId,
+        invalid === 'wrong-token' ? randomUUID() : claim.claimToken,
+        invalid === 'wrong-status' ? (status === 'uploaded' ? 'awaiting_upload' : 'uploaded') : status)).toBe(false);
+      await expect(repository.findByUploadId(job.uploadId)).resolves.toEqual(saved);
+    }
+  });
+
+  it.each(workStatuses)('cannot revive %s ownership that expires while renewal waits for a row lock', async (status) => {
+    const job = await createJob(status, dueAt());
+    const claim = (await claimNext(repository, status))!;
+    await adminPool.query(
+      "UPDATE jobs SET lease_expires_at = clock_timestamp() + interval '1 second' WHERE upload_id = $1", [job.uploadId],
+    );
+    const before = await repository.findByUploadId(job.uploadId);
+    const holder = await adminPool.connect();
+    let renewal: Promise<boolean> | undefined;
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT upload_id FROM jobs WHERE upload_id = $1 FOR UPDATE', [job.uploadId]);
+      renewal = repository.renewClaim(job.uploadId, claim.claimToken, status);
+      await expect.poll(async () => (await adminPool.query(
+        "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
+      )).rows[0].count).toBe(1);
+      await holder.query(
+        `SELECT pg_sleep(GREATEST(0, extract(epoch FROM (lease_expires_at - clock_timestamp()))) + 0.05)
+         FROM jobs WHERE upload_id = $1`, [job.uploadId],
+      );
+      await holder.query('COMMIT');
+      expect(await renewal).toBe(false);
+      await expect(repository.findByUploadId(job.uploadId)).resolves.toEqual(before);
+    } finally {
+      await holder.query('ROLLBACK');
+      await renewal?.catch(() => undefined);
+      holder.release();
+    }
+  });
+
+  it('cancels a blocked renewal on the server, rolls back, and cannot renew after the lock is released', async () => {
+    const job = await createJob('uploaded', dueAt());
+    const claim = (await repository.claimNextDueUploaded())!;
+    const before = await repository.findByUploadId(job.uploadId);
+    const holder = await adminPool.connect();
+    const renewalPool = new Pool({ connectionString: databaseUrl, application_name: 't2a-statement-timeout' });
+    let renewal: Promise<boolean> | undefined;
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT upload_id FROM jobs WHERE upload_id = $1 FOR UPDATE', [job.uploadId]);
+      renewal = new JobsRepository(renewalPool).renewClaim(job.uploadId, claim.claimToken, 'uploaded');
+      await expect(renewal).rejects.toMatchObject({ code: '57014' });
+      // A failed transaction retains locks until rollback/disconnect. Require the
+      // entire backend to disappear, including idle-in-transaction sessions.
+      await expect.poll(async () => (await adminPool.query(
+        "SELECT count(*)::int AS count FROM pg_stat_activity WHERE application_name = 't2a-statement-timeout'",
+      )).rows[0].count).toBe(0);
+      await holder.query('COMMIT');
+      await expect(repository.findByUploadId(job.uploadId)).resolves.toEqual(before);
+    } finally {
+      await holder.query('ROLLBACK');
+      await renewal?.catch(() => undefined);
+      holder.release();
+      await renewalPool.end();
+    }
+  });
+
+  it('disposes a running server request at the whole-request deadline after slow acquisition', async () => {
+    const job = await createJob('uploaded', dueAt());
+    const claim = (await repository.claimNextDueUploaded())!;
+    const before = await repository.findByUploadId(job.uploadId);
+    const holder = await adminPool.connect();
+    const renewalPool = new Pool({ connectionString: databaseUrl, application_name: 't2a-whole-request-timeout' });
+    const delayedPool = { connect: (callback: Parameters<Pool['connect']>[0]) => {
+      renewalPool.connect((error, client, release) => {
+        setTimeout(() => callback(error, client, release), 3_500);
+      });
+    } };
+    let renewal: Promise<boolean> | undefined;
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT upload_id FROM jobs WHERE upload_id = $1 FOR UPDATE', [job.uploadId]);
+      renewal = new JobsRepository(delayedPool as never).renewClaim(job.uploadId, claim.claimToken, 'uploaded');
+      const rejected = expect(renewal).rejects.toThrow('timed out');
+      await expect.poll(async () => (await adminPool.query(
+        "SELECT wait_event_type FROM pg_stat_activity WHERE application_name = 't2a-whole-request-timeout'",
+      )).rows[0]?.wait_event_type, { timeout: 4_500 }).toBe('Lock');
+      await rejected;
+      await expect.poll(async () => (await adminPool.query(
+        "SELECT count(*)::int AS count FROM pg_stat_activity WHERE application_name = 't2a-whole-request-timeout'",
+      )).rows[0].count).toBe(0);
+      await holder.query('COMMIT');
+      await expect(repository.findByUploadId(job.uploadId)).resolves.toEqual(before);
+    } finally {
+      await holder.query('ROLLBACK');
+      await renewal?.catch(() => undefined);
+      holder.release();
+      await renewalPool.end();
+    }
+  }, 10_000);
+
+  it.each(['active-query', 'query-gap'])('survives a renewal socket loss during %s and rejects without a late commit', (phase) => {
+    const script = `
+      import assert from 'node:assert/strict';
+      import { Pool } from 'pg';
+      import { runClaimRenewal } from ${JSON.stringify(new URL('../src/jobs/jobs.claim-renewal.ts', import.meta.url).href)};
+      const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+      pool.on('error', () => {});
+      const client = await pool.connect();
+      const query = client.query.bind(client);
+      const release = client.release.bind(client);
+      const queries = [];
+      const releases = [];
+      client.release = (error) => { releases.push(error); release(error); };
+      client.query = (...args) => {
+        queries.push(args[0]);
+        if (${JSON.stringify(phase)} === 'query-gap' && queries.length === 1) {
+          return query(...args).then(async (result) => {
+            const ended = new Promise((resolve) => client.once('end', resolve));
+            client.connection.stream.destroy();
+            await ended;
+            return result;
+          });
+        }
+        if (${JSON.stringify(phase)} === 'active-query' && queries.length === 2) {
+          const pending = query('SELECT pg_sleep(10)');
+          setTimeout(() => client.connection.stream.destroy(), 20);
+          return pending;
+        }
+        return query(...args);
+      };
+      const checkout = { connect: (callback) => {
+        if (callback) { callback(undefined, client); return; }
+        return Promise.resolve(client);
+      } };
+      try {
+        await assert.rejects(runClaimRenewal(checkout, 'SELECT 1', []), /Connection terminated/);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.deepEqual(releases, [true]);
+        assert.equal(queries.length, ${phase === 'active-query' ? 2 : 1});
+        assert.equal(queries.includes('COMMIT'), false);
+        assert.equal(pool.totalCount, 0);
+        console.log('SURVIVED: renewal rejected; disposed once; no late SQL or COMMIT');
+      } finally {
+        await pool.end();
+      }
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      env: process.env,
+      encoding: 'utf8',
+      timeout: 8_000,
+    });
+    expect(result.error, result.stderr).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('SURVIVED: renewal rejected; disposed once; no late SQL or COMMIT');
+  });
+
+  it('bounds renewal while its pool is exhausted and issues no late update', async () => {
+    const job = await createJob('uploaded', dueAt());
+    const claim = (await repository.claimNextDueUploaded())!;
+    const before = await repository.findByUploadId(job.uploadId);
+    const exhaustedPool = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 100 });
+    const held = await exhaustedPool.connect();
+    try {
+      await expect(new JobsRepository(exhaustedPool).renewClaim(job.uploadId, claim.claimToken, 'uploaded')).rejects.toThrow('timeout');
+      expect(exhaustedPool.waitingCount).toBe(0);
+    } finally {
+      held.release();
+      await exhaustedPool.end();
+    }
+    await expect(repository.findByUploadId(job.uploadId)).resolves.toEqual(before);
   });
 
   it('enforces paired ownership fields and forbids terminal claims', async () => {

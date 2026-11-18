@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE_POOL } from '../database/database.module.ts';
+import { runClaimRenewal } from './jobs.claim-renewal.ts';
 
 export const JOB_LEASE_MS = 2 * 60_000;
 
@@ -133,6 +134,22 @@ export class JobsRepository {
     const row = result.rows[0];
     // The claim update and database constraints guarantee non-null ownership.
     return row ? toJobRecord(row) as ClaimedJobRecord : null;
+  }
+
+  renewClaim(uploadId: string, claimToken: string, expectedStatus: ClaimableJobStatus): Promise<boolean> {
+    return runClaimRenewal(this.pool,
+      `WITH locked AS MATERIALIZED (
+         SELECT upload_id, claim_token, status, lease_expires_at FROM jobs
+         WHERE upload_id = $1
+         FOR UPDATE
+       )
+       UPDATE jobs SET lease_expires_at = clock_timestamp() + $4 * interval '1 millisecond'
+       WHERE upload_id = (
+         SELECT upload_id FROM locked
+         WHERE claim_token = $2 AND status = $3 AND lease_expires_at > clock_timestamp()
+       )`,
+      [uploadId, claimToken, expectedStatus, JOB_LEASE_MS],
+    );
   }
 
   confirmUpload(uploadId: string, claimToken: string): Promise<boolean> {

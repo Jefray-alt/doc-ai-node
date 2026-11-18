@@ -6,6 +6,7 @@ import { DownloadTooLargeError } from '../ingestion/pdf-downloader.errors.js';
 import { PdfExtractionError, PdfInputVerificationError, PdfPageLimitError } from '../ingestion/pdf-extractor.errors.js';
 import type { ClaimedJobRecord, ClaimableJobStatus, JobRecord } from './jobs.repository.js';
 import { JobsRepository } from './jobs.repository.js';
+import { JobLease } from './jobs.lease.ts';
 
 const CHECK_INTERVAL_MS = 5_000;
 const HEAD_TIMEOUT_MS = 5_000;
@@ -14,6 +15,7 @@ const EXPIRY_GRACE_MS = 10 * 60_000;
 interface JobAttempt {
   job: ClaimedJobRecord;
   outcomeStarted: boolean;
+  lease: JobLease;
 }
 
 function terminalExtractionCode(error: unknown): string | undefined {
@@ -102,16 +104,28 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        const attempt: JobAttempt = { job: due, outcomeStarted: false };
+        const attempt: JobAttempt = {
+          job: due,
+          outcomeStarted: false,
+          lease: new JobLease(this.shutdownController.signal,
+            () => this.jobs.renewClaim(due.uploadId, due.claimToken, status),
+            (error) => this.logger.error(
+              `Failed to renew claim for upload ${due.uploadId}`,
+              error instanceof Error ? error.stack : String(error),
+            )),
+        };
         try {
           if (this.stopping) return false;
           // Give the other status first choice next time, even after a failed attempt.
           this.preferUploaded = status === 'awaiting_upload';
           return await (status === 'uploaded' ? this.extractUpload(attempt) : this.reconcileUpload(attempt));
         } finally {
+          await attempt.lease.stopAndJoin();
           // An issued outcome may have committed even if its response was lost.
-          // Leave uncertain writes to lease expiry rather than releasing them.
-          if (this.stopping && !attempt.outcomeStarted) await this.releaseClaim(due, status);
+          // Uncertain ownership or writes must recover through expiry.
+          if (this.stopping && !attempt.outcomeStarted && !attempt.lease.abandoned) {
+            await this.releaseClaim(due, status);
+          }
         }
       }
     } catch (error) {
@@ -131,9 +145,9 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
     try {
       await this.ingestion.extract(job.bucket, job.objectKey, () => {
         pageCount += 1;
-      }, this.shutdownController.signal);
+      }, attempt.lease.signal);
     } catch (error) {
-      if (this.stopping) return false;
+      if (this.stopping || attempt.lease.abandoned) return false;
       this.logger.error(
         `Failed to extract upload ${job.uploadId}`,
         error instanceof Error ? error.stack : String(error),
@@ -148,7 +162,7 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
       return false;
     }
 
-    if (this.stopping) return false;
+    if (this.stopping || attempt.lease.abandoned) return false;
     return this.persist(
       attempt,
       () => this.jobs.completeExtraction(job.uploadId, job.claimToken, pageCount),
@@ -160,9 +174,9 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
     const { job } = attempt;
     let missing = false;
     try {
-      await this.sendHeadObject(job);
+      await this.sendHeadObject(job, attempt.lease.signal);
     } catch (error) {
-      if (this.stopping) return false;
+      if (this.stopping || attempt.lease.abandoned) return false;
       if (isMissingObject(error)) {
         missing = true;
       } else {
@@ -177,7 +191,7 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    if (this.stopping) return false;
+    if (this.stopping || attempt.lease.abandoned) return false;
     if (!missing) {
       return this.persist(
         attempt,
@@ -200,14 +214,14 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async sendHeadObject(job: JobRecord): Promise<void> {
+  private async sendHeadObject(job: JobRecord, attemptSignal: AbortSignal): Promise<void> {
     const timeoutController = new AbortController();
     const timeout = setTimeout(
       () => timeoutController.abort(new Error('S3 HeadObject request timed out')),
       HEAD_TIMEOUT_MS,
     );
     const abortSignal = AbortSignal.any([
-      this.shutdownController.signal,
+      attemptSignal,
       timeoutController.signal,
     ]);
 
@@ -242,7 +256,8 @@ export class JobsReconciler implements OnModuleInit, OnModuleDestroy {
     update: () => Promise<boolean>,
     successMessage?: string,
   ): Promise<boolean> {
-    if (this.stopping) return false;
+    await attempt.lease.stopAndJoin();
+    if (this.stopping || attempt.lease.abandoned) return false;
     attempt.outcomeStarted = true;
     try {
       const updated = await update();

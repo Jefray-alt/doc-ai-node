@@ -1,7 +1,7 @@
 # Job claiming for multiple workers
 
-**Status:** T1 completed; T2 deferred to a
-separately scoped follow-up. Worktree branch: `feat/job-claiming`.
+**Status:** T1 completed in `ebe70d3`. T2a completed; T2b ready for
+implementation. Worktree branch: `feat/job-claiming`.
 
 **Outcome:** Independent worker processes can handle different upload jobs at
 the same time. Each job has one current owner; abandoned claims expire, and a
@@ -121,7 +121,8 @@ confirms no HTTP listener and graceful shutdown with exit code 0.
 
 ### T2: Renew leases and finish crash and shutdown recovery
 
-**Task status:** Deferred; do not implement in the current work.
+**Task status:** Approved; implement T2a and then T2b, reviewing and committing
+each before starting the next.
 
 **Scope:** Worker lease lifecycle, guarded renewal operations, recovery
 tests, and backend operating instructions. Update this plan's task status on
@@ -145,7 +146,71 @@ Run backend unit/e2e suites, PostgreSQL integration tests, and the existing Floc
 flow, plus type checking, linting, and build. Document support for multiple
 worker processes and the lease/retry limitations.
 
-**Proposed commit:** `feat(worker): renew job leases and recover abandoned work`
+### T2a: Renew active ownership and discard abandoned attempts
+
+**Task status:** Completed; independent review passed.
+
+**Dependencies:** T1 reviewed and committed (`ebe70d3`).
+
+**Scope:** Guarded repository renewal, named 30-second heartbeats, bounded
+database acquisition/query cleanup, and per-attempt cancellation. Keep one
+renewal in flight; stop and await it before saving an outcome. Ownership loss
+or renewal errors abandon the attempt without writing an outcome or retry.
+Include implementation and its unit/lifecycle/PostgreSQL tests together.
+Retain the one-worker restriction until T2b passes.
+
+**Acceptance and checks:** Demonstrate failing tests first. Verify renewal
+extends only live matching ownership using PostgreSQL time, including expiry
+during a lock wait. Verify no overlapping or late queued renewals after timeout,
+long work remains owned, abandonment aborts cancellable I/O and suppresses all
+outcomes, and persistence waits for renewal before checking attempt state.
+Run focused tests, disposable PostgreSQL tests, backend unit/e2e checks,
+type checking, lint, and build. Preserve T1 regression coverage.
+
+**Proposed commit:** `feat(worker): renew leases and abandon lost ownership`
+
+**Implementation notes:** Renewal retains the token and uses the existing
+lock-first ownership check. A dedicated transaction has a five-second total
+request budget (including checkout) and a two-second server statement timeout.
+Failed/timed-out clients are disposed; late checkouts run no SQL. Heartbeats
+schedule only after the previous request settles, and outcome writes first
+stop and join renewal. Lost ownership aborts the attempt and suppresses results.
+Checked-out clients get an error listener inside the checkout callback;
+disconnects reject renewal, dispose once, and prevent further SQL. The listener
+remains through pool release and is then removed.
+
+**Validation:** Focused renewal/lifecycle tests (20), job regression tests (69),
+disposable PostgreSQL tests (40), and backend tests (130 passed,
+one known baseline startup exclusion) pass. PostgreSQL timeout checks confirm
+the renewal backend disappears with no transaction, lock, or late update left
+behind. Active-query and between-statement disconnect subprocess tests confirm
+the process survives, rejects renewal, and issues no late SQL or commit.
+Type checking, lint, build, direct compiled-worker shutdown, and
+whitespace checks pass. The unchanged npm-wrapper SIGTERM assertion described
+under T1 still fails; the direct worker exits gracefully with code 0.
+
+### T2b: Complete shutdown and verify multiple-worker recovery
+
+**Task status:** Approved; waiting for T2a review and commit.
+
+**Dependencies:** T2a reviewed and committed.
+
+**Scope:** Complete shutdown coordination and the two-worker recovery checks
+specified above. Stop renewal promptly, abort cancellable I/O, join renewal and
+database work and the parser, discard results, and best-effort release only a
+live matching claim, including a claim returned after shutdown. Document
+multiple-process support only after the concurrency checks pass; update the
+roadmap with the completed capability. Include implementation and its tests.
+
+**Acceptance and checks:** Cover shutdown during claim, HEAD/download, parsing,
+renewal, and outcome persistence, with no timer leaks or new outcome writes
+after stopping. Two independent workers against disposable PostgreSQL must
+handle different jobs, exclude live owners, reclaim an abandoned attempt, and
+reject its late result. Set stored expiry times explicitly for recovery tests.
+Run backend unit/e2e, PostgreSQL, and existing Floci flow tests, type checking,
+lint, build, and a direct compiled-worker shutdown check.
+
+**Proposed commit:** `feat(worker): complete shutdown and multiworker recovery`
 
 ## Review, rollout, and size
 
@@ -161,14 +226,16 @@ worker version. Old workers do not honor claims; mixed versions are unsupported.
 No extra database, runtime dependency, or general-purpose queue framework is
 required.
 
-Startup reassessment: **1,500-2,100 total added and deleted lines**, including
-existing test adaptations, new ownership and lifecycle coverage, and documentation,
-across both tasks. This exceeds the original 850-1,000-line estimate. Before
-coding, agree a smaller scope with the user. The user approved T1 only,
-estimated at 850-1,000 changed lines; separately scope T2 after T1 is reviewed
-and committed. T2 is outside the current implementation scope.
-Retain the single-replica restriction until both tasks and the concurrency checks
-pass. T1 does not complete the multiple-worker capability or change the roadmap.
+The initial combined estimate of **1,500-2,100 changed lines** led to the
+user-approved T1-only slice (932 actual added and deleted lines). After that
+size discussion and T1 completion, the user explicitly requested adding T2 as
+well. The full remaining T2 scope is authorized despite the original size
+guardrail; its current estimate is **1,050-1,400 added and deleted lines**,
+including implementation, tests, adaptations, and documentation. Split it into
+T2a (roughly 650-850) and T2b (roughly 400-550) for separate review and commits;
+this split does not reduce the total scope estimate.
+Retain the single-replica restriction until T2a, T2b, and the concurrency checks
+pass. Update roadmap progress only with the completed multiple-worker capability.
 
 Reference: PostgreSQL documents `SKIP LOCKED` for multiple consumers of a
 [queue-like table](https://www.postgresql.org/docs/17/sql-select.html#SQL-FOR-UPDATE-SHARE).

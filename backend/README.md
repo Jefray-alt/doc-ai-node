@@ -115,14 +115,18 @@ five seconds later. Logs include the original failure and upload ID; stored
 error codes do not contain raw error messages.
 
 Each upload check or extraction atomically acquires a fresh ownership token and
-fixed two-minute lease, measured by PostgreSQL time. Every outcome or retry
+two-minute lease, measured by PostgreSQL time, renewed every 30 seconds during
+active work. Each renewal has a five-second database request budget and a
+two-second PostgreSQL statement timeout. Every outcome or retry
 requires that token, the expected status, and a live lease; accepted writes clear
 ownership. An active extraction remains `uploaded` until its final outcome is saved.
 Abandoned claims become eligible again after expiry, so interrupted attempts or
-failed outcome writes can repeat computation. There is no lease renewal yet:
-work lasting over two minutes loses ownership and its outcome is discarded.
-Keep exactly one worker process and replica until lease renewal and the full
-recovery lifecycle are implemented and verified.
+failed outcome writes can repeat computation. A rejected or failed renewal aborts
+cancellable I/O, awaits remaining parsing, and discards the result without writing
+an outcome or retry. Outcome writes wait for any pending renewal to finish.
+Parsing can delay heartbeats; an expired lease cannot renew or save an outcome.
+Keep exactly one worker process and replica until the full recovery lifecycle
+and multiple-worker checks are implemented and verified.
 
 Shutdown stops new work and aborts the active download, then awaits any parser
 already running without saving its outcome. It best-effort releases an unused
