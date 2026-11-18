@@ -533,22 +533,33 @@ describe('JobsReconciler', () => {
 
   it.each(['awaiting_upload', 'uploaded'] as const)('releases a late %s claim after shutdown without starting I/O', async (status) => {
     let finishClaim!: (value: JobRecord) => void;
+    let finishRelease!: (value: boolean) => void;
     const claim = vi.fn(() => new Promise<JobRecord>((resolve) => { finishClaim = resolve; }));
     const repository = {
       claimNextDueAwaitingUpload: status === 'awaiting_upload' ? claim : vi.fn().mockResolvedValue(null),
       claimNextDueUploaded: status === 'uploaded' ? claim : vi.fn().mockResolvedValue(null),
-      releaseClaim: vi.fn().mockResolvedValue(true),
+      releaseClaim: vi.fn(() => new Promise<boolean>((resolve) => { finishRelease = resolve; })),
     };
     const send = vi.fn();
-    const reconciler = createReconciler(repository, { send } as never);
+    const extract = vi.fn();
+    const reconciler = new JobsReconciler(repository as never, { send } as never, { extract } as never);
     const cycle = reconciler.reconcileOnce();
     await vi.advanceTimersByTimeAsync(0);
-    const shutdown = reconciler.onModuleDestroy();
+    let closed = false;
+    const shutdown = reconciler.onModuleDestroy().then(() => { closed = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(closed).toBe(false);
     finishClaim(job('late', { status }));
-    await Promise.all([cycle, shutdown]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(closed).toBe(false);
     expect(repository.releaseClaim).toHaveBeenCalledExactlyOnceWith('late', 'owner-token', status);
+    finishRelease(true);
+    await Promise.all([cycle, shutdown]);
+    await reconciler.reconcileOnce();
     expect(send).not.toHaveBeenCalled();
+    expect(extract).not.toHaveBeenCalled();
     expect(claim).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it.each([false, true])('best-effort releases an aborted HEAD claim (release fails=%s)', async (fails) => {

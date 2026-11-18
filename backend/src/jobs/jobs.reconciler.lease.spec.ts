@@ -160,4 +160,100 @@ describe('worker ownership heartbeat', () => {
     expect(jobs.releaseClaim).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it.each([true, false, new Error('renewal response lost')])(
+    'joins renewal on shutdown and releases only certain ownership (%s)', async (renewed) => {
+      const { jobs, work, reconciler, signal } = setup();
+      const pending = deferred<boolean>();
+      jobs.renewClaim.mockReturnValueOnce(pending.promise);
+      reconciler.onModuleInit();
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      let closed = false;
+      const shutdown = reconciler.onModuleDestroy().then(() => { closed = true; });
+      expect(signal().aborted).toBe(true);
+      work.resolve();
+      await vi.advanceTimersByTimeAsync(90_000);
+      expect(closed).toBe(false);
+      expect(jobs.renewClaim).toHaveBeenCalledOnce();
+      expect(jobs.releaseClaim).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+
+      if (renewed instanceof Error) pending.reject(renewed);
+      else pending.resolve(renewed);
+      await shutdown;
+      await reconciler.reconcileOnce();
+      expect(jobs.claimNextDueAwaitingUpload).toHaveBeenCalledOnce();
+      expect(jobs.claimNextDueUploaded).toHaveBeenCalledOnce();
+      expect(jobs.completeExtraction).not.toHaveBeenCalled();
+      expect(jobs.failExtraction).not.toHaveBeenCalled();
+      expect(jobs.retryExtraction).not.toHaveBeenCalled();
+      expect(jobs.releaseClaim).toHaveBeenCalledTimes(renewed === true ? 1 : 0);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it('discards a finished result when shutdown arrives while persistence is joining renewal', async () => {
+    const { jobs, work, reconciler } = setup();
+    const pending = deferred<boolean>();
+    jobs.renewClaim.mockReturnValueOnce(pending.promise);
+    const cycle = reconciler.reconcileOnce();
+    await vi.advanceTimersByTimeAsync(30_000);
+    work.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(jobs.completeExtraction).not.toHaveBeenCalled();
+
+    const shutdown = reconciler.onModuleDestroy();
+    pending.resolve(true);
+    await Promise.all([cycle, shutdown]);
+    expect(jobs.completeExtraction).not.toHaveBeenCalled();
+    expect(jobs.releaseClaim).toHaveBeenCalledExactlyOnceWith('long-job', 'owner', 'uploaded');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([true, new Error('outcome response lost')])('awaits an already-issued outcome on shutdown (%s)', async (result) => {
+    const { jobs, work, reconciler } = setup();
+    const pending = deferred<boolean>();
+    jobs.completeExtraction.mockReturnValueOnce(pending.promise);
+    reconciler.onModuleInit();
+    work.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(jobs.completeExtraction).toHaveBeenCalledOnce();
+
+    let closed = false;
+    const shutdown = reconciler.onModuleDestroy().then(() => { closed = true; });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(closed).toBe(false);
+    expect(jobs.renewClaim).not.toHaveBeenCalled();
+    expect(jobs.releaseClaim).not.toHaveBeenCalled();
+    if (result instanceof Error) pending.reject(result);
+    else pending.resolve(result);
+    await shutdown;
+    await reconciler.reconcileOnce();
+    expect(jobs.claimNextDueUploaded).toHaveBeenCalledOnce();
+    expect(jobs.completeExtraction).toHaveBeenCalledOnce();
+    expect(jobs.releaseClaim).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([true, new Error('release unavailable')])('awaits best-effort release on shutdown (%s)', async (result) => {
+    const { jobs, work, reconciler } = setup();
+    const pending = deferred<boolean>();
+    jobs.releaseClaim.mockReturnValueOnce(pending.promise);
+    const cycle = reconciler.reconcileOnce();
+    await vi.advanceTimersByTimeAsync(0);
+    let closed = false;
+    const shutdown = reconciler.onModuleDestroy().then(() => { closed = true; });
+    expect(jobs.releaseClaim).not.toHaveBeenCalled();
+    work.resolve();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(closed).toBe(false);
+    expect(jobs.releaseClaim).toHaveBeenCalledExactlyOnceWith('long-job', 'owner', 'uploaded');
+    expect(jobs.renewClaim).not.toHaveBeenCalled();
+    if (result instanceof Error) pending.reject(result);
+    else pending.resolve(result);
+    await Promise.all([cycle, shutdown]);
+    expect(jobs.completeExtraction).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

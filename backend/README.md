@@ -41,7 +41,8 @@ transaction, and records their versions in `schema_migrations`. Running it
 again is safe. Do not remove the Compose volume when stopping local services if
 you need to retain job records.
 
-`npm run test:postgres` runs the migration and repository integration suite.
+`npm run test:postgres` runs the migration, repository, and independent-worker
+integration suite, including concurrent handling and recovery after lease expiry.
 Set `DATABASE_URL` to an empty disposable database with a fresh schema; the
 migration test expects to apply the initial migration itself. Do not point this
 suite at a shared or application database.
@@ -89,9 +90,11 @@ bytes. A successful storage response means the PDF is awaiting validation and
 does not make it available for chat. PostgreSQL and the initial migration must
 be available for this endpoint to issue an authorization.
 
-Run exactly one standalone worker process and replica in this first version.
-Its single polling loop handles one due job at a time, alternating between
+Multiple independent standalone worker processes can share the same jobs database
+and S3 bucket. Start each with `npm run start:worker` after building. Each process's
+single polling loop handles one due job at a time, alternating between
 `awaiting_upload` checks and `uploaded` extraction when both have due work.
+Alternation is per process; there is no global fairness guarantee across workers.
 Within each status, jobs are ordered by next check time, creation time, then
 upload ID as a deterministic tie-breaker. Locked or actively leased jobs are skipped.
 Upload checks use S3 HEAD requests with a five-second request timeout. After
@@ -124,15 +127,21 @@ Abandoned claims become eligible again after expiry, so interrupted attempts or
 failed outcome writes can repeat computation. A rejected or failed renewal aborts
 cancellable I/O, awaits remaining parsing, and discards the result without writing
 an outcome or retry. Outcome writes wait for any pending renewal to finish.
-Parsing can delay heartbeats; an expired lease cannot renew or save an outcome.
-Keep exactly one worker process and replica until the full recovery lifecycle
-and multiple-worker checks are implemented and verified.
+Parsing can block the Node event loop and delay heartbeats; an expired lease
+cannot renew or save an outcome. Separate worker processes provide parallelism.
+Ordinary polling reclaims expired claims without a separate cleanup service.
+Retries can repeat computation; this does not provide exactly-once execution.
 
-Shutdown stops new work and aborts the active download, then awaits any parser
-already running without saving its outcome. It best-effort releases an unused
-live claim; failed releases and uncertain outcome writes recover through expiry.
-PDF parsing cannot be forcibly interrupted and has no hard deadline. The worker
-does not delete uploaded objects, embed text, or make documents ready for chat.
+Shutdown stops new claims immediately, aborts the active HEAD request or download,
+and stops heartbeat scheduling. It awaits in-flight renewal and database work and
+any parser already running, then discards its result and best-effort releases
+only the still-live matching claim. A claim returned after shutdown is released
+without starting work. No new outcome write starts after shutdown or ownership
+loss; a write already issued may commit. Failed releases, uncertain ownership,
+and uncertain outcome writes recover through database lease expiry. PDF parsing
+cannot be forcibly interrupted, so processing and shutdown have no hard deadline.
+The worker does not delete uploaded objects, embed text, or make documents ready
+for chat.
 
 Before deploying this migration, stop all old workers, apply migrations, then
 start only the new worker version. Mixed versions are unsupported because old

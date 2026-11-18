@@ -1,7 +1,7 @@
 # Job claiming for multiple workers
 
-**Status:** T1 completed in `ebe70d3`. T2a completed; T2b ready for
-implementation. Worktree branch: `feat/job-claiming`.
+**Status:** T1 completed in `ebe70d3`; T2a completed in `7f7058d`. T2b
+completed; independent review passed. Worktree branch: `feat/job-claiming`.
 
 **Outcome:** Independent worker processes can handle different upload jobs at
 the same time. Each job has one current owner; abandoned claims expire, and a
@@ -121,8 +121,7 @@ confirms no HTTP listener and graceful shutdown with exit code 0.
 
 ### T2: Renew leases and finish crash and shutdown recovery
 
-**Task status:** Approved; implement T2a and then T2b, reviewing and committing
-each before starting the next.
+**Task status:** Completed; T2a and T2b independently reviewed.
 
 **Scope:** Worker lease lifecycle, guarded renewal operations, recovery
 tests, and backend operating instructions. Update this plan's task status on
@@ -191,7 +190,7 @@ under T1 still fails; the direct worker exits gracefully with code 0.
 
 ### T2b: Complete shutdown and verify multiple-worker recovery
 
-**Task status:** Approved; waiting for T2a review and commit.
+**Task status:** Completed; independent review passed.
 
 **Dependencies:** T2a reviewed and committed.
 
@@ -211,6 +210,24 @@ Run backend unit/e2e, PostgreSQL, and existing Floci flow tests, type checking,
 lint, build, and a direct compiled-worker shutdown check.
 
 **Proposed commit:** `feat(worker): complete shutdown and multiworker recovery`
+
+**Implementation notes:** T1/T2a already provide the required shutdown behavior;
+T2b adds missing shutdown-race and independent-worker PostgreSQL coverage plus
+operating documentation, without changing production code. Existing behavior
+passed the new scenarios, so no artificial failing test or production edit was
+needed. Checks verify late claims, pending renewal, parsing, release, and issued
+outcome writes during shutdown; two workers handle separate jobs, skip live
+owners, reclaim explicit expiry, and reject stale outcomes/releases. Multiple
+processes are supported; parsing can delay heartbeats or shutdown, retries can
+repeat computation, and exactly-once execution is not guaranteed.
+
+**Validation:** Lifecycle tests (61), backend/configured e2e suites (138 passed,
+one known baseline startup exclusion), disposable PostgreSQL tests (46), and
+the unchanged Floci signed-upload flow (2) pass. Type checking, lint, build,
+direct compiled-worker shutdown, and whitespace checks pass. Production and
+startup source/configuration remain identical to the T2a commit; the previously
+documented npm-wrapper shutdown assertion remains excluded. The roadmap records
+the completed worker capability while the broader MVP remains in progress.
 
 ## Review, rollout, and size
 

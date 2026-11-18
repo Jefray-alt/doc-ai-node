@@ -2,17 +2,25 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { Pool } from 'pg';
 import { closeDatabasePool, getDatabasePool } from '../src/database/database.pool.js';
 import { migrateDatabase } from '../src/database/migrations/migrate.js';
 import { JobsRepository } from '../src/jobs/jobs.repository.js';
+import { JobsReconciler } from '../src/jobs/jobs.reconciler.ts';
 import type { JobStatus } from '../src/jobs/jobs.repository.js';
+import type { PdfPageConsumer } from '../src/ingestion/pdf-extractor.types.ts';
 
 const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
   throw new Error('DATABASE_URL is required for the PostgreSQL integration suite');
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
 }
 
 describe('PostgreSQL upload jobs', () => {
@@ -268,6 +276,143 @@ describe('PostgreSQL upload jobs', () => {
     expect(second.uploadId).toBe(job.uploadId);
     expect(second.claimToken).not.toBe(first.claimToken);
     expect(second.leaseExpiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  // Keep worker checks in this sequential suite, after its fresh-schema migration
+  // test. Independent pools model workers without sharing any in-process state.
+  function workerFixture() {
+    const pool = new Pool({ connectionString: databaseUrl, max: 2 });
+    const jobs = new JobsRepository(pool);
+    const gate = deferred<void>();
+    const started = deferred<void>();
+    const statuses: string[] = [];
+    const s3 = { send: vi.fn(async () => {
+      statuses.push('awaiting_upload');
+      started.resolve();
+      await gate.promise;
+      return {};
+    }) };
+    const ingestion = { extract: vi.fn(async (_bucket: string, _key: string, consume: PdfPageConsumer) => {
+      statuses.push('uploaded');
+      started.resolve();
+      await gate.promise; // A parser may continue even after its signal is aborted.
+      await consume({ pageNumber: 1, text: 'controlled page' });
+    }) };
+    const worker = new JobsReconciler(jobs, s3 as never, ingestion as never);
+    return { pool, jobs, gate, started, statuses, worker };
+  }
+
+  async function closeWorkers(workers: ReturnType<typeof workerFixture>[], cycles: Promise<void>[]) {
+    const shutdowns = workers.map(({ worker }) => worker.onModuleDestroy());
+    for (const { gate } of workers) gate.resolve();
+    await Promise.all([...cycles, ...shutdowns]);
+    await Promise.all(workers.map(({ pool }) => pool.end()));
+  }
+
+  it.each(workStatuses)('two independent workers handle different %s jobs concurrently, one per worker', async (status) => {
+    const jobs = [await createJob(status, dueAt()), await createJob(status, dueAt())];
+    const workers = [workerFixture(), workerFixture()];
+    const cycles = workers.map(({ worker }) => worker.reconcileOnce());
+    try {
+      await Promise.all(workers.map(({ started }) => started.promise));
+      const owned = await Promise.all(jobs.map(({ uploadId }) => repository.findByUploadId(uploadId)));
+      expect(owned.every((job) => job?.claimToken && job.leaseExpiresAt!.getTime() > Date.now())).toBe(true);
+      expect(new Set(owned.map((job) => job!.claimToken)).size).toBe(2);
+      await expect(claimNext(repository, status)).resolves.toBeNull();
+      // Even explicit concurrent calls cannot start a second job inside a worker.
+      cycles.push(...workers.map(({ worker }) => worker.reconcileOnce()));
+      for (const fixture of workers) expect(fixture.statuses).toEqual([status]);
+      for (const { gate } of workers) gate.resolve();
+      await Promise.all(cycles);
+      for (const { uploadId } of jobs) {
+        await expect(repository.findByUploadId(uploadId)).resolves.toMatchObject({
+          status: status === 'uploaded' ? 'extracted' : 'uploaded',
+          claimToken: null, leaseExpiresAt: null,
+          pageCount: status === 'uploaded' ? 1 : null,
+        });
+      }
+    } finally {
+      await closeWorkers(workers, cycles);
+    }
+  });
+
+  it.each(workStatuses)('an expired %s attempt cannot overwrite a replacement worker, even while it is still active', async (status) => {
+    const job = await createJob(status, dueAt());
+    const old = workerFixture();
+    const replacement = workerFixture();
+    const outcome = vi.spyOn(old.jobs, status === 'uploaded' ? 'completeExtraction' : 'confirmUpload');
+    const cycles = [old.worker.reconcileOnce()];
+    try {
+      await old.started.promise;
+      const first = (await repository.findByUploadId(job.uploadId))!;
+      await replacement.worker.reconcileOnce();
+      expect(replacement.statuses).toEqual([]); // A live lease excludes another worker.
+      await expireClaim(job.uploadId); // Deterministic crash/slow-parser recovery, no lease-length sleep.
+      cycles.push(replacement.worker.reconcileOnce());
+      await replacement.started.promise;
+      const replaced = (await repository.findByUploadId(job.uploadId))!;
+      expect(replaced.claimToken).not.toBe(first.claimToken);
+      expect(replaced.claimToken).not.toBeNull();
+
+      old.gate.resolve();
+      await cycles[0];
+      expect(outcome).toHaveBeenCalledOnce();
+      await expect(outcome.mock.results[0]!.value).resolves.toBe(false);
+      await expect(repository.findByUploadId(job.uploadId)).resolves.toEqual(replaced);
+      replacement.gate.resolve();
+      await cycles[1];
+      await expect(repository.findByUploadId(job.uploadId)).resolves.toMatchObject({
+        status: status === 'uploaded' ? 'extracted' : 'uploaded', claimToken: null,
+      });
+    } finally {
+      await closeWorkers([old, replacement], cycles);
+    }
+  });
+
+  it('reclaims a shutting-down parser and rejects its late release against a live replacement', async () => {
+    const job = await createJob('uploaded', dueAt());
+    const old = workerFixture();
+    const replacement = workerFixture();
+    const release = vi.spyOn(old.jobs, 'releaseClaim');
+    const complete = vi.spyOn(old.jobs, 'completeExtraction');
+    const cycles = [old.worker.reconcileOnce()];
+    try {
+      await old.started.promise;
+      const shutdown = old.worker.onModuleDestroy();
+      await expireClaim(job.uploadId);
+      cycles.push(replacement.worker.reconcileOnce());
+      await replacement.started.promise;
+      const owned = await repository.findByUploadId(job.uploadId);
+      old.gate.resolve();
+      await shutdown;
+      expect(complete).not.toHaveBeenCalled();
+      expect(release).toHaveBeenCalledOnce();
+      await expect(release.mock.results[0]!.value).resolves.toBe(false);
+      await expect(repository.findByUploadId(job.uploadId)).resolves.toEqual(owned);
+      replacement.gate.resolve();
+      await cycles[1];
+      await expect(repository.findByUploadId(job.uploadId)).resolves.toMatchObject({
+        status: 'extracted', pageCount: 1, claimToken: null,
+      });
+    } finally {
+      await closeWorkers([old, replacement], cycles);
+    }
+  });
+
+  it('keeps status alternation independent for each worker', async () => {
+    for (const status of workStatuses) {
+      for (let index = 0; index < 4; index++) await createJob(status, dueAt());
+    }
+    const workers = [workerFixture(), workerFixture()];
+    try {
+      for (const fixture of workers) {
+        fixture.gate.resolve();
+        for (let cycle = 0; cycle < 3; cycle++) await fixture.worker.reconcileOnce();
+        expect(fixture.statuses).toEqual(['awaiting_upload', 'uploaded', 'awaiting_upload']);
+      }
+    } finally {
+      await closeWorkers(workers, []);
+    }
   });
 
   const retryAt = new Date('2099-01-01T00:00:00Z');
